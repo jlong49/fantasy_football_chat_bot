@@ -115,6 +115,7 @@ class TestGatherSeason:
         stats = recap.gather_season(league_with_two_weeks())
         a, b, c, d = (stats.teams[i] for i in (1, 2, 3, 4))
         assert (a.wins, a.losses) == (2, 1) and a.points_for == 250 and a.points_against == 255
+        assert (a.reg_wins, a.reg_losses) == (1, 1) and a.reg_points_for == 160
         assert (b.wins, b.losses) == (1, 1)
         assert (c.wins, c.losses) == (1, 2)
         assert (d.wins, d.losses) == (1, 1)
@@ -139,9 +140,9 @@ class TestGatherSeason:
         # Week 1 A scored 100: beat all 3. Week 2 A scored 60: beat nobody (120, 70, 65).
         assert (a.allplay_wins, a.allplay_losses) == (3, 3)
         assert a.expected_wins == 1.0
-        # Two regular-season wins would be expected 1.0; A actually went 1-1 in
-        # the regular season and 2-1 overall, so luck counts the playoff win too.
-        assert a.luck == 1.0
+        # A went 1-1 in the regular season against 1.0 expected: no luck either
+        # way. The playoff win in week 3 does not count.
+        assert a.luck == 0.0
         c = stats.teams[3]
         # Week 1 C 80: beat 50 and 79, lost to 100. Week 2 C 65: beat 60, lost to 120 and 70.
         assert (c.allplay_wins, c.allplay_losses) == (3, 3)
@@ -171,8 +172,8 @@ class TestFinalOrder:
 
     def test_falls_back_to_wins_then_points(self):
         order, is_final = recap.final_order(recap.gather_season(league_with_two_weeks(final_known=False)))
-        # C's 230 PF outranks B's 170 among the one-win teams.
-        assert not is_final and [t.team.team_abbrev for t in order] == ['AAA', 'CCC', 'BBB', 'DDD']
+        # All four are 1-1 in the regular season; ordered by regular-season points.
+        assert not is_final and [t.team.team_abbrev for t in order] == ['BBB', 'AAA', 'DDD', 'CCC']
 
 
 class TestSections:
@@ -186,7 +187,7 @@ class TestSections:
         assert first[0] == '🏆 2025 Season Recap: Test League'
         assert first[1:4] == ['Champion: Alpha', 'Runner-up: Charlie', 'Last place: Delta']
         assert first[5] == 'Final standings'
-        assert first[6] == ' 1. AAA   2-1       250.00 PF'
+        assert first[6] == ' 1. AAA   1-1       160.00 PF'
 
     def test_header_when_playoffs_not_final(self):
         first = recap.season_recap_sections(league_with_two_weeks(final_known=False))[0].splitlines()

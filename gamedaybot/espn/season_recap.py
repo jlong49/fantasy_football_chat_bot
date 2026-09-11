@@ -164,8 +164,10 @@ class TeamSeason(object):
 
     def __init__(self, team):
         self.team = team
-        self.wins = self.losses = self.ties = 0
+        self.wins = self.losses = self.ties = 0          # every week played, playoffs included
+        self.reg_wins = self.reg_losses = self.reg_ties = 0  # regular season only
         self.points_for = self.points_against = 0.0
+        self.reg_points_for = 0.0
         self.optimal = self.actual = 0.0
         self.allplay_wins = self.allplay_losses = 0
         self.expected_wins = 0.0
@@ -183,14 +185,15 @@ class TeamSeason(object):
 
     @property
     def luck(self):
-        """Actual wins minus the wins an average schedule would have given."""
-        return self.wins - self.expected_wins
+        """Regular-season wins minus the wins an average schedule would have given."""
+        return self.reg_wins - self.expected_wins
 
     @property
     def record(self):
-        if self.ties:
-            return '%d-%d-%d' % (self.wins, self.losses, self.ties)
-        return '%d-%d' % (self.wins, self.losses)
+        """Regular-season record, the way ESPN reports it."""
+        if self.reg_ties:
+            return '%d-%d-%d' % (self.reg_wins, self.reg_losses, self.reg_ties)
+        return '%d-%d' % (self.reg_wins, self.reg_losses)
 
 
 class SeasonStats(object):
@@ -250,12 +253,18 @@ def gather_season(league, last_week=None):
                 s.points_against += opp_score
                 s.optimal += optimal
                 s.actual += actual
+                regular = week <= regular_weeks
                 if score > opp_score:
                     s.wins += 1
+                    s.reg_wins += regular
                 elif score < opp_score:
                     s.losses += 1
+                    s.reg_losses += regular
                 else:
                     s.ties += 1
+                    s.reg_ties += regular
+                if regular:
+                    s.reg_points_for += score
                 if s.best_week is None or score > s.best_week[0]:
                     s.best_week = (score, week)
                 if s.worst_week is None or score < s.worst_week[0]:
@@ -311,7 +320,7 @@ def final_order(stats):
     teams = list(stats.teams.values())
     if teams and all(getattr(t.team, 'final_standing', 0) for t in teams):
         return sorted(teams, key=lambda t: t.team.final_standing), True
-    return sorted(teams, key=lambda t: (t.wins, t.points_for), reverse=True), False
+    return sorted(teams, key=lambda t: (t.reg_wins, t.reg_points_for), reverse=True), False
 
 
 def season_recap_sections(league, stats=None):
@@ -339,7 +348,7 @@ def season_recap_sections(league, stats=None):
         else:
             lines.append('Standings through week %d (playoffs not final)' % stats.last_week)
         for pos, t in enumerate(order, 1):
-            lines.append('%2d. %-5s %-7s %8.2f PF' % (pos, t.team.team_abbrev, t.record, t.points_for))
+            lines.append('%2d. %-5s %-7s %8.2f PF' % (pos, t.team.team_abbrev, t.record, t.reg_points_for))
     sections = ['\n'.join(lines)]
 
     if not stats.weeks_counted:
