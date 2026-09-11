@@ -57,6 +57,19 @@ class TestDiscord:
         Discord(self.url, "1").send_message(self.test_text, mention_text='hi')
         assert mock_requests.last_request.json()['content'] == '```This is a test.```\nhi'
 
+    def test_mentions_channel_gets_the_whole_message(self, mock_requests):
+        other = "https://discordapp.com/api/webhooks/456/def"
+        mock_requests.post(other, status_code=204)
+        Discord(self.url, other).send_message(self.test_text, mention_text='<@1> wins', channel='mentions')
+        posts = [(r.url, r.json()['content']) for r in mock_requests.request_history]
+        assert posts == [(other, '```This is a test.```\n<@1> wins')]
+
+    def test_mentions_channel_without_second_webhook_uses_main(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        self.test_bot.send_message(self.test_text, mention_text='<@1> wins', channel='mentions')
+        assert [r.url for r in mock_requests.request_history] == [self.url]
+        assert mock_requests.last_request.json()['content'] == '```This is a test.```\n<@1> wins'
+
     def test_bad_bot_id(self, mock_requests):
         '''Does the expected error raise when a bot id is incorrect?'''
         mock_requests.post(self.url, status_code=404)

@@ -86,7 +86,7 @@ class TestScheduleShape:
         assert set(jobs()) == {
             'close_scores', 'power_rankings', 'final', 'standings',
             'waiver_report', 'matchups', 'scoreboard1', 'monitor', 'scoreboard2',
-            'trades',
+            'trades', 'season_recap',
         }
 
     def test_monitor_report_can_be_disabled(self, jobs, monkeypatch):

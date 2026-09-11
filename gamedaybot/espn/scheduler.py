@@ -66,6 +66,10 @@ def scheduler():
                   day_of_week='sun', hour='16,20', start_date=ff_start_date, end_date=ff_end_date,
                   timezone=game_timezone, replace_existing=True)
 
+    # season recap: daily at 9am local; posts once, the first day the season is over.
+    sched.add_job(espn_bot, 'cron', ['season_recap'], id='season_recap',
+                  hour=9, minute=0, start_date=ff_start_date, end_date=ff_end_date,
+                  timezone=my_timezone, replace_existing=True)
     sched.add_job(espn_bot, 'cron', ['get_trade_announcements'], id='trades',
                   minute=7, start_date=ff_start_date, end_date=ff_end_date,
                   timezone=game_timezone, replace_existing=True)

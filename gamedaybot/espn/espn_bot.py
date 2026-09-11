@@ -79,6 +79,9 @@ def espn_bot(function):
     get_standings: sends a message with the standings for the league.
     get_final: sends the final scores and trophies for the previous week.
     get_waiver_report: sends a message with the waiver report for the league.
+    season_recap: once the season is over, posts the end-of-season recap (standings, superlatives,
+        trophy case, luck, all-play, bench points) to the mention channel if there is one.
+    season_recap_now: the same recap for the season so far, on demand.
     get_trade_announcements: sends any trade accepted since the last check (pinging the
         announce role, since the league's veto window is open) and any trade that has
         since completed.
@@ -154,8 +157,8 @@ def espn_bot(function):
     except KeyError:
         broadcast_message = None
 
-    # always let init and broadcast run
-    if function not in ["init", "broadcast", "win_matrix", "trophy_recap"] and (league.scoringPeriodId > league.finalScoringPeriod or league.scoringPeriodId < league.firstScoringPeriod):
+    # always let init and broadcast run; the season recap is for after the season
+    if function not in ["init", "broadcast", "win_matrix", "trophy_recap", "season_recap", "season_recap_now"] and (league.scoringPeriodId > league.finalScoringPeriod or league.scoringPeriodId < league.firstScoringPeriod):
         logger.info("Not in active season")
         return
 
@@ -188,6 +191,23 @@ def espn_bot(function):
         text = espn.get_trophies(league)
     elif function == "get_standings":
         text = espn.get_standings(league)
+    elif function in ("season_recap", "season_recap_now"):
+        # Scheduled daily once the window opens; fires once per season, the
+        # first day ESPN reports the final period as over. The _now variant
+        # posts a to-date recap on demand and does not touch the state.
+        state = callouts._load_trade_state(data['state_dir'])
+        if function == "season_recap":
+            if not recap.season_is_over(league) or recap.recap_already_posted(state, year):
+                return
+        stats = recap.gather_season(league)
+        sections = recap.season_recap_sections(league, stats)
+        ping = recap.season_recap_mentions(league, mentions, stats)
+        for index, section in enumerate(sections):
+            _broadcast(section, ping if index == len(sections) - 1 else '',
+                       str_limit, groupme_bot, slack_bot, discord_bot, discord_channel='mentions')
+        if function == "season_recap":
+            callouts._save_trade_state(data['state_dir'], recap.mark_recap_posted(state, year))
+        return
     elif function == "win_matrix":
         text = recap.win_matrix(league)
     elif function == "trophy_recap":
@@ -237,7 +257,7 @@ def espn_bot(function):
     _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot)
 
 
-def _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot):
+def _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot, discord_channel='reports'):
     """Send one report to every configured platform, mention text to Discord only."""
     if not util.has_sendable_content(text):
         return
@@ -247,7 +267,8 @@ def _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bo
         groupme_bot.send_message(message)
         slack_bot.send_message(message)
         # Mentions ride on the last chunk so they land under the report.
-        discord_bot.send_message(message, mention_text if index == len(messages) - 1 else None)
+        discord_bot.send_message(message, mention_text if index == len(messages) - 1 else None,
+                                 channel=discord_channel)
 
 
 if __name__ == '__main__':

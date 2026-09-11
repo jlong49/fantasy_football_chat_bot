@@ -38,7 +38,7 @@ class Discord(object):
     def __repr__(self):
         return "Discord Webhook Url(%s)" % self.webhook_url
 
-    def send_message(self, text, mention_text=None):
+    def send_message(self, text, mention_text=None, channel='reports'):
         """
         Sends a message to the Discord channel.
 
@@ -51,6 +51,13 @@ class Discord(object):
             Lines appended after the code block as ordinary text, so that
             ``<@user>`` and ``<@&role>`` markup in them pings people. Only
             user and role mentions are allowed through; @everyone is not.
+        channel : str, optional
+            'reports' (default) sends the text to the main webhook and, when a
+            mention webhook is configured, the mention text there instead.
+            'mentions' sends the whole message -- text and mention text -- to
+            the mention webhook, for things the discussion channel should get
+            in full, like the season recap. Without a mention webhook both
+            behave the same.
 
         Returns
         -------
@@ -64,6 +71,11 @@ class Discord(object):
         """
 
         message = "```{0}```".format(text)
+        if channel == 'mentions' and self.mention_webhook_url:
+            if mention_text:
+                message = message + "\n" + mention_text
+            return self._post(self.mention_webhook_url, message)
+
         if mention_text and not self.mention_webhook_url:
             message = message + "\n" + mention_text
 

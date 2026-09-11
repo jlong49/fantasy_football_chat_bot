@@ -134,6 +134,7 @@ to `END_DATE`, and the bot goes quiet once the league's matchup periods are over
 | Standings | Wed | 7:30 AM local | Current standings |
 | Waiver Report | Wed | 7:31 AM local | Every add/drop from the day, with FAAB bids and the outbid rival in FAAB leagues |
 | Matchups + projections | Thu | 7:30 PM ET | Next week's matchups with records |
+| Season Recap | First day after the final week | 9:00 AM local | Champion and final standings, season superlatives, the Trophy Case, Fortune Index, Win Matrix and bench points, recomputed from every week's box scores. Goes to the mention channel if one is set |
 | Trade Accepted / Complete | Any | Hourly | A trade accepted in the last hour (pings the announce role while the league can still veto), and a quiet confirmation once it completes |
 
 Optional: `DAILY_WAIVER` moves the Waiver Report to a daily send, and `MONITOR_REPORT`
@@ -532,8 +533,8 @@ python3 -c "from gamedaybot.espn.espn_bot import espn_bot; espn_bot('get_standin
 
 Valid names: `get_scoreboard_short`, `get_projected_scoreboard`, `get_matchups`,
 `get_monitor`, `get_close_scores`, `get_power_rankings`, `get_trophies`, `get_standings`,
-`get_final`, `get_waiver_report`, `get_trade_announcements`, `win_matrix`, `trophy_recap`,
-`init`.
+`get_final`, `get_waiver_report`, `get_trade_announcements`, `season_recap_now`, `win_matrix`,
+`trophy_recap`, `init`.
 
 `win_matrix` (how the standings would look if everyone played everyone) and
 `trophy_recap` (season-long trophy tally) aren't on the schedule - they're on-demand

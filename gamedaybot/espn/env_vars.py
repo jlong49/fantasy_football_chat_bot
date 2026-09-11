@@ -66,7 +66,9 @@ def get_env_vars():
 
     try:
         discord_webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
-        str_limit = 3000
+        # Discord rejects content over 2000 characters; the code fence and a
+        # trailing mention line need room inside that.
+        str_limit = 1900
     except KeyError:
         discord_webhook_url = 1
 
