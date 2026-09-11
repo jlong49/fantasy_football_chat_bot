@@ -140,10 +140,14 @@ Optional: `DAILY_WAIVER` moves the Waiver Report to a daily send, and `MONITOR_R
 (on by default) controls the Sunday Players to Monitor message.
 
 **Discord @mentions.** Set `DISCORD_TEAM_MENTIONS` and the Sunday/Monday scoreboards
-gain a trash-talk line under the code block that pings the owners involved
-("🔥 @you is DESTROYING @them by 48.20", plus the tightest game when it's within 10),
-and the Tuesday final pings the top score, the low score, the biggest win and the
-worst bench manager. Set `DISCORD_ANNOUNCE_ROLE_ID` and Trade Alerts ping that role.
+gain up to three trash-talk lines under the code block that ping the owners involved,
+all worked out from the live projection (points so far plus projections for anyone
+still to play) so they never contradict the projected scores above them: "🔥 @a is
+DESTROYING @b" once the projected winner is up 30+ and @b is nearly out of players,
+"🔄 @a is up 29.70 on @b, but @b is still projected to win" for a lead that won't
+hold, and "😬 @a vs @b is a coin flip" when a mostly-played matchup is projected
+within 5. Nothing is said until half the week's starters have played. The Tuesday
+final pings the top score, the low score, the biggest win and the worst bench manager. Set `DISCORD_ANNOUNCE_ROLE_ID` and Trade Alerts ping that role.
 Mentions can't render inside Discord code blocks, which is why these lines sit
 beneath the report rather than in it.
 

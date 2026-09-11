@@ -84,48 +84,135 @@ class TestMentions:
         assert not callouts.Mentions(None).has_teams
 
 
+def P(points, projected=None, played=True, slot='WR'):
+    """A starter: points scored (if played) and a projection."""
+    p = FakePlayer('WR', slot, points if played else 0.0)
+    p.projected_points = projected if projected is not None else points
+    p.game_played = 100 if played else 0
+    return p
+
+
+def live(home, home_players, away, away_players):
+    """A matchup whose scores are the sum of the played starters' points."""
+    def total(players):
+        return sum(p.points for p in players if p.slot_position not in ('BE', 'IR'))
+    return FakeBox(home, total(home_players), away, total(away_players), home_players, away_players)
+
+
+def played(n, points=10.0):
+    return [P(points) for _ in range(n)]
+
+
+def left(n, projected=10.0):
+    return [P(0, projected, played=False) for _ in range(n)]
+
+
 class TestLiveCallouts:
+    """Nine starters a side, like a standard lineup."""
+
+    M = callouts.Mentions(MAP)
+
     def test_no_mapping_means_no_callouts(self):
-        boxes = [FakeBox(A, 150, B, 80)]
+        boxes = [live(A, played(9, 20), B, played(7, 5) + left(2))]
         assert callouts.live_callouts(boxes, callouts.Mentions({})) == ''
 
-    def test_nothing_scored_yet(self):
-        boxes = [FakeBox(A, 0, B, 0), FakeBox(C, 0, D, 0)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == ''
+    def test_silent_until_half_the_week_has_played(self):
+        # Friday morning: one Thursday-night player a side has played and
+        # the team ahead is projected to lose. Nothing is said.
+        boxes = [live(A, [P(29.7)] + left(8, 10), B, [P(0.0)] + left(8, 14)),
+                 live(C, played(1) + left(8), D, played(1) + left(8))]
+        assert callouts.live_callouts(boxes, self.M) == ''
 
-    def test_destroying_line_for_big_lead(self):
-        boxes = [FakeBox(A, 150.5, B, 80.25)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == \
-            '🔥 <@111> is DESTROYING <@222> by 70.25'
+    def test_silent_when_nothing_played(self):
+        boxes = [live(A, left(9), B, left(9))]
+        assert callouts.live_callouts(boxes, self.M) == ''
 
-    def test_away_team_can_be_the_one_destroying(self):
-        boxes = [FakeBox(A, 80.25, B, 150.5)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == \
-            '🔥 <@222> is DESTROYING <@111> by 70.25'
+    def test_destroying_when_projected_winner_leads_and_trailer_is_nearly_done(self):
+        # A: 8 played x 20 = 160, one left projected 10 -> proj 170.
+        # B: 7 played x 10 = 70, two left projected 10 -> proj 90.
+        boxes = [live(A, played(8, 20) + left(1), B, played(7) + left(2))]
+        assert callouts.live_callouts(boxes, self.M) == \
+            '🔥 <@111> is DESTROYING <@222>, up 90.00 with <@222> 2 players left'
 
-    def test_beating_line_under_threshold(self):
-        boxes = [FakeBox(A, 100, B, 85)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == \
-            '💪 <@111> is beating <@222> by 15.00'
+    def test_destroying_trailer_out_of_players(self):
+        boxes = [live(A, played(8, 20) + left(1), B, played(9, 10))]
+        assert callouts.live_callouts(boxes, self.M) == \
+            '🔥 <@111> is DESTROYING <@222>, up 70.00 with <@222> out of players'
 
-    def test_close_game_gets_second_line(self):
-        boxes = [FakeBox(A, 150, B, 80), FakeBox(C, 101.5, D, 100)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == \
-            '🔥 <@111> is DESTROYING <@222> by 70.00\n' \
-            '😬 <@333> is barely hanging on against Delta, up 1.50'
+    def test_no_destroying_when_trailer_has_too_many_left(self):
+        # Same margin, but B still has three to play.
+        boxes = [live(A, played(8, 20) + left(1), B, played(6) + left(3))]
+        assert '🔥' not in callouts.live_callouts(boxes, self.M)
 
-    def test_close_line_omitted_when_not_close(self):
-        boxes = [FakeBox(A, 150, B, 80), FakeBox(C, 120, D, 100)]
-        assert '😬' not in callouts.live_callouts(boxes, callouts.Mentions(MAP))
+    def test_no_destroying_when_projected_margin_too_small(self):
+        # A: 90 done. B: 35 on the board, two left projected 13 -> 61. Margin 29, not 30.
+        boxes = [live(A, played(9, 10), B, played(7, 5.0) + left(2, 13.0))]
+        assert '🔥' not in callouts.live_callouts(boxes, self.M)
 
-    def test_single_close_game_is_not_reported_twice(self):
-        boxes = [FakeBox(A, 101, B, 100)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == \
-            '💪 <@111> is beating <@222> by 1.00'
+    def test_no_destroying_when_board_leader_is_projected_to_lose(self):
+        # A leads 90-35 on the board but B has two 40-point players left.
+        boxes = [live(A, played(9, 10), B, played(7, 5.0) + left(2, 40.0))]
+        text = callouts.live_callouts(boxes, self.M)
+        assert '🔥' not in text
+        assert text == '🔄 <@111> is up 55.00 on <@222>, but <@222> is still projected to win by 25.00 with 2 players left'
 
-    def test_bye_and_tie_ignored(self):
-        boxes = [FakeBox(A, 100, None, 0), FakeBox(C, 90, D, 90)]
-        assert callouts.live_callouts(boxes, callouts.Mentions(MAP)) == ''
+    def test_comeback_needs_a_real_lead(self):
+        # A up 10 on the board, projected to lose: not worth a line.
+        boxes = [live(A, played(9, 10), B, played(7, 80 / 7) + left(2, 40.0))]
+        assert '🔄' not in callouts.live_callouts(boxes, self.M)
+
+    def test_finished_matchup_stays_quiet(self):
+        boxes = [live(A, played(9, 20), B, played(9, 5))]
+        assert callouts.live_callouts(boxes, self.M) == ''
+
+    def test_coin_flip_when_mostly_played_and_tight(self):
+        # 16 of 18 played, projected 91 vs 90.
+        boxes = [live(A, played(8, 10) + left(1, 11.0), B, played(8, 10) + left(1, 10.0))]
+        assert callouts.live_callouts(boxes, self.M) == \
+            '😬 <@111> vs <@222> is a coin flip, projected within 1.00 with 2 players left between them'
+
+    def test_coin_flip_needs_most_of_the_matchup_played(self):
+        # Tight projection but only 10 of 18 have played (56%).
+        boxes = [live(A, played(5, 10) + left(4, 10.0), B, played(5, 10) + left(4, 10.25))]
+        assert callouts.live_callouts(boxes, self.M) == ''
+
+    def test_coin_flip_needs_a_tight_projection(self):
+        boxes = [live(A, played(8, 10) + left(1, 16.0), B, played(8, 10) + left(1, 10.0))]
+        assert callouts.live_callouts(boxes, self.M) == ''
+
+    def test_coin_flip_singular_player(self):
+        boxes = [live(A, played(9, 10), B, played(8, 10) + left(1, 11.0))]
+        assert callouts.live_callouts(boxes, self.M) == \
+            '😬 <@111> vs <@222> is a coin flip, projected within 1.00 with 1 player left between them'
+
+    def test_all_three_lines_in_order_from_different_matchups(self):
+        boxes = [
+            live(C, played(8, 10) + left(1, 11.0), D, played(8, 10) + left(1, 10.0)),   # coin flip
+            live(A, played(8, 20) + left(1), B, played(9, 10)),                         # destroying
+            live(C, played(9, 10), A, played(7, 5.0) + left(2, 40.0)),                  # comeback
+        ]
+        assert callouts.live_callouts(boxes, self.M).splitlines() == [
+            '🔥 <@111> is DESTROYING <@222>, up 70.00 with <@222> out of players',
+            '🔄 <@333> is up 55.00 on <@111>, but <@111> is still projected to win by 25.00 with 2 players left',
+            '😬 <@333> vs Delta is a coin flip, projected within 1.00 with 2 players left between them',
+        ]
+
+    def test_picks_the_biggest_blowout(self):
+        boxes = [live(A, played(8, 20) + left(1), B, played(9, 10)),
+                 live(C, played(8, 30) + left(1), D, played(9, 10))]
+        text = callouts.live_callouts(boxes, self.M)
+        assert text.startswith('🔥 <@333> is DESTROYING Delta')
+
+    def test_bench_and_ir_do_not_count(self):
+        bench = [P(0, 50.0, played=False, slot='BE'), P(0, 50.0, played=False, slot='IR')]
+        boxes = [live(A, played(8, 20) + left(1) + bench, B, played(9, 10) + bench)]
+        assert callouts.live_callouts(boxes, self.M) == \
+            '🔥 <@111> is DESTROYING <@222>, up 70.00 with <@222> out of players'
+
+    def test_bye_matchup_ignored(self):
+        boxes = [FakeBox(A, 100, None, 0, played(9), []),
+                 live(C, played(8, 20) + left(1), D, played(9, 10))]
+        assert '🔥 <@333> is DESTROYING Delta' in callouts.live_callouts(boxes, self.M)
 
 
 class FakeSettings:

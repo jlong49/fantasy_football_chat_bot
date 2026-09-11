@@ -19,10 +19,24 @@ import gamedaybot.espn.functionality as espn
 
 logger = logging.getLogger(__name__)
 
-# A lead at or above this many points is "DESTROYING"; below it is merely "beating".
+# Live scoreboard callouts are built from the live projection (actual points
+# for starters who have played, projections for the rest -- the same numbers
+# as the "Approximate Projected Scores" block) so they never contradict it.
+#
+# No live callouts at all until this share of the week's starters has played.
+# Friday morning is one game in; Sunday 4 PM ET is the early window done.
+LIVE_MIN_PLAYED_FRACTION = 0.5
+# "DESTROYING": projected margin at least this, the leader is also the
+# projected winner, and the trailer has at most this many starters left.
 DESTROYING_MARGIN = 30
-# A lead under this many points gets the "barely hanging on" line.
-CLOSE_MARGIN = 10
+DESTROYING_MAX_LEFT = 2
+# "Comeback watch": the team ahead on the board by at least this much is
+# still projected to lose.
+COMEBACK_MIN_LEAD = 15
+# "Coin flip": projected margin under this, with at least this share of the
+# matchup's starters already played and someone still left to play.
+COIN_FLIP_MARGIN = 5
+COIN_FLIP_MIN_PLAYED = 0.75
 
 # Activity-feed topics scanned per trade check. ESPN returns newest first, so
 # this only needs to cover the trades that can clear between two hourly runs.
@@ -123,10 +137,93 @@ def _matchup_margins(box_scores):
             yield -margin, box.away_team, box.home_team
 
 
+def _is_starter(player):
+    return player.slot_position not in ('BE', 'IR')
+
+
+def _starters_left(lineup):
+    """Starters whose game has not finished. Bye players count as finished."""
+    return sum(1 for p in lineup if _is_starter(p) and p.game_played < 100)
+
+
+def _starter_count(lineup):
+    return sum(1 for p in lineup if _is_starter(p))
+
+
+def _players_left(n):
+    if n == 0:
+        return 'out of players'
+    if n == 1:
+        return '1 player left'
+    return '%d players left' % n
+
+
+class _LiveMatchup(object):
+    """One in-progress matchup, read through the live projection."""
+
+    def __init__(self, box):
+        self.home = box.home_team
+        self.away = box.away_team
+        self.home_actual = box.home_score
+        self.away_actual = box.away_score
+        self.home_proj = espn.get_projected_total(box.home_lineup)
+        self.away_proj = espn.get_projected_total(box.away_lineup)
+        self.home_left = _starters_left(box.home_lineup)
+        self.away_left = _starters_left(box.away_lineup)
+        self.starters = _starter_count(box.home_lineup) + _starter_count(box.away_lineup)
+
+    @property
+    def left(self):
+        return self.home_left + self.away_left
+
+    @property
+    def played_fraction(self):
+        return (self.starters - self.left) / self.starters if self.starters else 0.0
+
+    @property
+    def proj_margin(self):
+        return abs(self.home_proj - self.away_proj)
+
+    @property
+    def actual_margin(self):
+        return abs(self.home_actual - self.away_actual)
+
+    def proj_leader(self):
+        """(leader, trailer, trailer_left) by live projection, or None if level."""
+        if self.home_proj == self.away_proj:
+            return None
+        if self.home_proj > self.away_proj:
+            return self.home, self.away, self.away_left
+        return self.away, self.home, self.home_left
+
+    def actual_leader(self):
+        """(leader, trailer) by points on the board, or None if level."""
+        if self.home_actual == self.away_actual:
+            return None
+        if self.home_actual > self.away_actual:
+            return self.home, self.away
+        return self.away, self.home
+
+
 def live_callouts(box_scores, mentions):
     """
-    Trash talk for an in-progress scoreboard: the biggest lead and, if it is
-    tight, the closest game.
+    Trash talk for an in-progress scoreboard, built from the live projection
+    rather than the raw score so a Thursday-night lead is never mistaken for
+    a win.
+
+    At most three lines, in this order, each from the single matchup that best
+    fits it:
+
+    - DESTROYING: the leader is also the projected winner, by at least
+      DESTROYING_MARGIN, and the trailer has DESTROYING_MAX_LEFT or fewer
+      starters left.
+    - Comeback watch: the team ahead on the board by COMEBACK_MIN_LEAD or
+      more is still projected to lose.
+    - Coin flip: projected margin under COIN_FLIP_MARGIN, most of the
+      matchup already played, and someone still left to play.
+
+    Nothing is said before LIVE_MIN_PLAYED_FRACTION of the week's starters
+    have played, and finished matchups are left for Tuesday's final.
 
     Parameters
     ----------
@@ -137,28 +234,66 @@ def live_callouts(box_scores, mentions):
     Returns
     -------
     str
-        Up to two lines, or '' when there is no mapping or nothing has been
-        scored yet.
+        The lines, or '' when there is no mapping or nothing qualifies.
     """
     if not mentions.has_teams:
         return ''
-    margins = list(_matchup_margins(box_scores))
-    if not margins:
+    matchups = [_LiveMatchup(box) for box in box_scores if not espn.is_bye_box(box)]
+    starters = sum(m.starters for m in matchups)
+    if not starters:
         return ''
-    biggest = max(margins, key=lambda m: m[0])
-    closest = min(margins, key=lambda m: m[0])
+    played = starters - sum(m.left for m in matchups)
+    if played / starters < LIVE_MIN_PLAYED_FRACTION:
+        return ''
+    # A finished matchup gets its verdict with the trophies.
+    matchups = [m for m in matchups if m.left > 0]
 
     lines = []
-    margin, leader, trailer = biggest
-    if margin >= DESTROYING_MARGIN:
-        lines.append('🔥 %s is DESTROYING %s by %.2f' % (mentions.team(leader), mentions.team(trailer), margin))
-    else:
-        lines.append('💪 %s is beating %s by %.2f' % (mentions.team(leader), mentions.team(trailer), margin))
 
-    if closest is not biggest and closest[0] < CLOSE_MARGIN:
-        margin, leader, trailer = closest
-        lines.append('😬 %s is barely hanging on against %s, up %.2f' %
-                     (mentions.team(leader), mentions.team(trailer), margin))
+    destroying = None
+    for m in matchups:
+        proj = m.proj_leader()
+        actual = m.actual_leader()
+        if proj is None or actual is None or proj[0] is not actual[0]:
+            continue
+        if m.proj_margin < DESTROYING_MARGIN or proj[2] > DESTROYING_MAX_LEFT:
+            continue
+        if destroying is None or m.proj_margin > destroying[0].proj_margin:
+            destroying = (m, proj)
+    if destroying is not None:
+        m, (leader, trailer, trailer_left) = destroying
+        lines.append('🔥 %s is DESTROYING %s, up %.2f with %s %s' %
+                     (mentions.team(leader), mentions.team(trailer), m.actual_margin,
+                      mentions.team(trailer), _players_left(trailer_left)))
+
+    comeback = None
+    for m in matchups:
+        proj = m.proj_leader()
+        actual = m.actual_leader()
+        if proj is None or actual is None or proj[0] is actual[0]:
+            continue
+        if m.actual_margin < COMEBACK_MIN_LEAD:
+            continue
+        if comeback is None or m.actual_margin > comeback[0].actual_margin:
+            comeback = (m, proj, actual)
+    if comeback is not None:
+        m, (proj_leader, _, _), (board_leader, _) = comeback
+        proj_left = m.home_left if proj_leader is m.home else m.away_left
+        lines.append('🔄 %s is up %.2f on %s, but %s is still projected to win by %.2f with %s' %
+                     (mentions.team(board_leader), m.actual_margin, mentions.team(proj_leader),
+                      mentions.team(proj_leader), m.proj_margin, _players_left(proj_left)))
+
+    coin_flip = None
+    for m in matchups:
+        if m.proj_margin >= COIN_FLIP_MARGIN or m.played_fraction < COIN_FLIP_MIN_PLAYED:
+            continue
+        if coin_flip is None or m.proj_margin < coin_flip.proj_margin:
+            coin_flip = m
+    if coin_flip is not None:
+        m = coin_flip
+        lines.append('😬 %s vs %s is a coin flip, projected within %.2f with %s between them' %
+                     (mentions.team(m.home), mentions.team(m.away), m.proj_margin, _players_left(m.left)))
+
     return '\n'.join(lines)
 
 
