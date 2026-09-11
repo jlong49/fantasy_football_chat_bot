@@ -8,6 +8,8 @@ on:
   release:
     types:
       - published
+  # Manual rebuild of the current commit, e.g. after enabling Actions on a fork.
+  workflow_dispatch:
 
 permissions:
   contents: write # create the tag and release on a push to main
