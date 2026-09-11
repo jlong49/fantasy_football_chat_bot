@@ -37,6 +37,26 @@ class TestDiscord:
         self.test_bot.send_message(self.test_text, mention_text='')
         assert mock_requests.last_request.json()['content'] == '```This is a test.```'
 
+    def test_second_webhook_gets_mentions_on_their_own(self, mock_requests):
+        other = "https://discordapp.com/api/webhooks/456/def"
+        mock_requests.post(self.url, status_code=204)
+        mock_requests.post(other, status_code=204)
+        Discord(self.url, other).send_message(self.test_text, mention_text='<@1> is DESTROYING <@2>')
+        posts = [(r.url, r.json()['content']) for r in mock_requests.request_history]
+        assert posts == [(self.url, '```This is a test.```'), (other, '<@1> is DESTROYING <@2>')]
+        assert all(r.json()['allowed_mentions'] == {'parse': ['users', 'roles']} for r in mock_requests.request_history)
+
+    def test_second_webhook_unused_without_mention_text(self, mock_requests):
+        other = "https://discordapp.com/api/webhooks/456/def"
+        mock_requests.post(self.url, status_code=204)
+        Discord(self.url, other).send_message(self.test_text)
+        assert [r.url for r in mock_requests.request_history] == [self.url]
+
+    def test_placeholder_second_webhook_means_single_channel(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        Discord(self.url, "1").send_message(self.test_text, mention_text='hi')
+        assert mock_requests.last_request.json()['content'] == '```This is a test.```\nhi'
+
     def test_bad_bot_id(self, mock_requests):
         '''Does the expected error raise when a bot id is incorrect?'''
         mock_requests.post(self.url, status_code=404)

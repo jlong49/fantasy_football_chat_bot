@@ -29,8 +29,11 @@ class Discord(object):
         Sends a message to the Discord channel.
     """
 
-    def __init__(self, webhook_url):
+    def __init__(self, webhook_url, mention_webhook_url=None):
         self.webhook_url = webhook_url
+        # When set, mention text is posted here as its own message (say, the
+        # league's discussion channel) instead of under the report.
+        self.mention_webhook_url = mention_webhook_url if mention_webhook_url not in (None, 1, "1", '') else None
 
     def __repr__(self):
         return "Discord Webhook Url(%s)" % self.webhook_url
@@ -61,22 +64,25 @@ class Discord(object):
         """
 
         message = "```{0}```".format(text)
-        if mention_text:
+        if mention_text and not self.mention_webhook_url:
             message = message + "\n" + mention_text
+
+        r = None
+        if self.webhook_url not in (1, "1", ''):
+            r = self._post(self.webhook_url, message)
+        if mention_text and self.mention_webhook_url:
+            self._post(self.mention_webhook_url, mention_text)
+        return r
+
+    def _post(self, url, content):
         template = {
-            "content": message,  # limit 3000 chars
+            "content": content,  # limit 3000 chars
             "allowed_mentions": {"parse": ["users", "roles"]},
         }
-
         headers = {'content-type': 'application/json'}
-
-        if self.webhook_url not in (1, "1", ''):
-            r = requests.post(self.webhook_url,
-                              data=json.dumps(template), headers=headers)
-
-            if r.status_code != 204:
-                print(r.content)
-                logger.error(r.content)
-                raise DiscordException(r.content)
-
-            return r
+        r = requests.post(url, data=json.dumps(template), headers=headers)
+        if r.status_code != 204:
+            print(r.content)
+            logger.error(r.content)
+            raise DiscordException(r.content)
+        return r

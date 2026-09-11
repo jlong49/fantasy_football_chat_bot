@@ -79,7 +79,9 @@ def espn_bot(function):
     get_standings: sends a message with the standings for the league.
     get_final: sends the final scores and trophies for the previous week.
     get_waiver_report: sends a message with the waiver report for the league.
-    get_trade_announcements: sends any trade that cleared since the last check.
+    get_trade_announcements: sends any trade accepted since the last check (pinging the
+        announce role, since the league's veto window is open) and any trade that has
+        since completed.
     init: sends a message to confirm that the bot has been set up.
 
     On Discord, some functions also send a short block of mention text after
@@ -140,7 +142,7 @@ def espn_bot(function):
 
     groupme_bot = GroupMe(bot_id)
     slack_bot = Slack(slack_webhook_url)
-    discord_bot = Discord(discord_webhook_url)
+    discord_bot = Discord(discord_webhook_url, data.get('discord_mention_webhook_url'))
 
     if swid == '{1}' or espn_s2 == '1':
         league = League(league_id=league_id, year=year)
@@ -208,9 +210,14 @@ def espn_bot(function):
         faab = league.settings.faab
         text = espn.get_waiver_report(league, faab)
     elif function == "get_trade_announcements":
+        accepted = callouts.accepted_trade_alerts(league, data['state_dir'])
+        if accepted:
+            # The deal rides along in the ping when that goes to another channel.
+            split = bool(data.get('discord_mention_webhook_url'))
+            _broadcast(accepted, callouts.trade_mention(mentions, accepted if split else None),
+                       str_limit, groupme_bot, slack_bot, discord_bot)
+        # Completed trades are a quiet confirmation; the ping went out on acceptance.
         text = callouts.trade_announcements(league, data['state_dir'])
-        if text:
-            mention_text = callouts.trade_mention(mentions)
     elif function == "broadcast":
         try:
             text = broadcast_message
@@ -227,14 +234,20 @@ def espn_bot(function):
         text = "Something bad happened. HALP"
 
     logger.debug(data)
-    if util.has_sendable_content(text):
-        logger.debug(text)
-        messages = util.str_limit_check(text, str_limit)
-        for index, message in enumerate(messages):
-            groupme_bot.send_message(message)
-            slack_bot.send_message(message)
-            # Mentions ride on the last chunk so they land under the report.
-            discord_bot.send_message(message, mention_text if index == len(messages) - 1 else None)
+    _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot)
+
+
+def _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot):
+    """Send one report to every configured platform, mention text to Discord only."""
+    if not util.has_sendable_content(text):
+        return
+    logger.debug(text)
+    messages = util.str_limit_check(text, str_limit)
+    for index, message in enumerate(messages):
+        groupme_bot.send_message(message)
+        slack_bot.send_message(message)
+        # Mentions ride on the last chunk so they land under the report.
+        discord_bot.send_message(message, mention_text if index == len(messages) - 1 else None)
 
 
 if __name__ == '__main__':

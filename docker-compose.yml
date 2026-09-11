@@ -30,7 +30,9 @@ services:
       # SWID:
       # #Discord only: ESPN team id -> Discord user id pairs, for @mention callouts
       # DISCORD_TEAM_MENTIONS: "1:393143738374946817,2:192444104804794368"
-      # #Discord only: role id pinged for trade announcements
+      # #Discord only: role id pinged when a trade is accepted (veto window open)
       # DISCORD_ANNOUNCE_ROLE_ID:
+      # #Discord only: second webhook that receives just the @mention lines
+      # DISCORD_MENTION_WEBHOOK_URL:
       # #Writable dir for the trade announcer's state file (default /tmp)
       # STATE_DIR:

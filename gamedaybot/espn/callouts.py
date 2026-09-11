@@ -54,6 +54,15 @@ TRADE_OVERLAP_MS = 2 * 60 * 60 * 1000
 TRADE_HISTORY = 50
 TRADE_STATE_FILE = 'gamedaybot_trades.json'
 
+# An accepted trade sits in the league's review window (tradeSettings.
+# revisionHours, 24h by default) before it executes. The acceptance is the
+# moment to ping the league: that is when a veto vote can still happen.
+# Accept records this old or older are never announced, so a fresh install
+# does not replay the season's history.
+TRADE_ACCEPT_MAX_AGE_MS = 48 * 60 * 60 * 1000
+TRADE_ACCEPT_TYPE = 'TRADE_ACCEPT'
+TRADE_PROPOSAL_TYPE = 'TRADE_PROPOSAL'
+
 
 def parse_team_mentions(raw):
     """
@@ -484,21 +493,176 @@ def trade_announcements(league, state_dir, now_ms=None):
     blocks = [format_trade(a) for a in fresh]
     blocks = [b for b in blocks if b]
 
-    state = {
-        'last_seen': max(now_ms, last_seen or 0),
-        'announced': (announced + [str(a.date) for a in fresh])[-TRADE_HISTORY:],
-    }
+    state['last_seen'] = max(now_ms, last_seen or 0)
+    state['announced'] = (announced + [str(a.date) for a in fresh])[-TRADE_HISTORY:]
     _save_trade_state(state_dir, state)
 
     if not blocks:
         return ''
-    header = 'Trade Alert' if len(blocks) == 1 else 'Trade Alert (%d trades)' % len(blocks)
+    header = 'Trade Complete' if len(blocks) == 1 else 'Trades Complete (%d)' % len(blocks)
     return '\n\n'.join([header] + blocks)
 
 
-def trade_mention(mentions):
-    """The line that pings the league about a trade, or '' with no role set."""
+def _raw_trade_records(league):
+    """
+    Raw TRADE_* rows from mTransactions2 for the current and previous scoring
+    periods, keyed by transaction id. Two periods because an acceptance late
+    on a Monday night is stamped with the week that just ended.
+    """
+    current = getattr(league, 'scoringPeriodId', 0) or 0
+    records = {}
+    for period in sorted({max(current - 1, 0), current}):
+        try:
+            data = league.espn_request.league_get(params={'view': 'mTransactions2', 'scoringPeriodId': period})
+        except Exception:
+            logger.warning('Could not read transactions for scoring period %s', period, exc_info=True)
+            continue
+        for row in (data or {}).get('transactions', []) or []:
+            if str(row.get('type', '')).startswith('TRADE') and row.get('id'):
+                records[row['id']] = row
+    return records
+
+
+def _pending_trade_records(league):
+    """Raw rows from mPendingTransactions, keyed by id. Often empty."""
+    try:
+        data = league.espn_request.league_get(params={'view': 'mPendingTransactions'})
+    except Exception:
+        logger.info('Could not read pending transactions', exc_info=True)
+        return {}
+    return {row['id']: row for row in (data or {}).get('pendingTransactions', []) or [] if row.get('id')}
+
+
+def _review_hours(league):
+    """The league's trade review window in hours, or None if unreadable."""
+    try:
+        data = league.espn_request.league_get(params={'view': 'mSettings'})
+        hours = data['settings']['tradeSettings']['revisionHours']
+        return int(hours) if hours else None
+    except Exception:
+        return None
+
+
+def _team_name(league, team_id):
+    team = league.get_team_data(team_id) if team_id else None
+    return team.team_name if team else 'Team %s' % team_id
+
+
+def format_proposal(league, proposal):
+    """
+    A raw TRADE_PROPOSAL row as 'Team sends: ...' lines, one per side, with a
+    'Team drops: ...' line for any player cut to make room.
+
+    Items are ``{type, fromTeamId, toTeamId, playerId, overallPickNumber}``:
+    TRADE for a player, DRAFT_TRADE for a pick (playerId 0), DROP for a
+    player released to make room (toTeamId 0). Player names come from
+    league.player_map; an id ESPN did not resolve shows as 'Unknown'.
+    """
+    sends, drops, order = {}, {}, []
+    for item in proposal.get('items', []) or []:
+        kind = item.get('type')
+        team_id = item.get('fromTeamId')
+        if kind == 'DRAFT_TRADE':
+            pick = item.get('overallPickNumber')
+            label = 'pick #%s' % pick if pick else 'a draft pick'
+            bucket = sends
+        elif kind == 'TRADE':
+            label = league.player_map.get(item.get('playerId'), 'Unknown')
+            bucket = sends
+        elif kind == 'DROP':
+            label = league.player_map.get(item.get('playerId'), 'Unknown')
+            bucket = drops
+        else:
+            continue
+        if team_id not in order:
+            order.append(team_id)
+        bucket.setdefault(team_id, []).append(str(label))
+
+    lines = []
+    for team_id in order:
+        name = _team_name(league, team_id)
+        if team_id in sends:
+            lines.append('%s sends: %s' % (name, ', '.join(sends[team_id])))
+        if team_id in drops:
+            lines.append('%s drops: %s' % (name, ', '.join(drops[team_id])))
+    return '\n'.join(lines)
+
+
+def accepted_trade_alerts(league, state_dir, now_ms=None):
+    """
+    Trades accepted since the last run and now sitting in the league's review
+    window, from the raw transaction rows.
+
+    ESPN records an acceptance as a TRADE_ACCEPT row whose
+    relatedTransactionId names the TRADE_PROPOSAL that carries the players.
+    The proposal is looked up in the same rows and in mPendingTransactions;
+    if ESPN has already hidden it, the alert still goes out naming the team
+    that accepted, since the point is the veto window, not the box score.
+
+    Announced proposal ids are kept in the trade state file under
+    'accepted' so nothing is repeated.
+
+    Returns
+    -------
+    str
+        A 'Trade Accepted' block, or '' when nothing new was accepted.
+    """
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    state = _load_trade_state(state_dir)
+    announced = [str(i) for i in state.get('accepted', [])]
+
+    records = _raw_trade_records(league)
+    accepts = []
+    for row in records.values():
+        if row.get('type') != TRADE_ACCEPT_TYPE:
+            continue
+        proposal_id = row.get('relatedTransactionId')
+        stamp = row.get('processDate') or row.get('proposedDate') or 0
+        if not proposal_id or proposal_id in announced:
+            continue
+        if stamp <= now_ms - TRADE_ACCEPT_MAX_AGE_MS:
+            continue
+        accepts.append((stamp, proposal_id, row))
+    if not accepts:
+        return ''
+    accepts.sort()
+
+    pending = None
+    blocks = []
+    for stamp, proposal_id, row in accepts:
+        proposal = records.get(proposal_id)
+        if proposal is None:
+            if pending is None:
+                pending = _pending_trade_records(league)
+            proposal = pending.get(proposal_id)
+        body = format_proposal(league, proposal) if proposal else ''
+        if not body:
+            body = '%s accepted a trade (ESPN has not shown the players yet)' % _team_name(league, row.get('teamId'))
+        blocks.append(body)
+
+    state['accepted'] = (announced + [proposal_id for _, proposal_id, _ in accepts])[-TRADE_HISTORY:]
+    _save_trade_state(state_dir, state)
+
+    hours = _review_hours(league)
+    header = 'Trade Accepted' if len(blocks) == 1 else 'Trades Accepted (%d)' % len(blocks)
+    if hours:
+        header += ' - %dh to veto' % hours
+    return '\n\n'.join([header] + blocks)
+
+
+def trade_mention(mentions, block=None):
+    """
+    The line that pings the league about an accepted trade, or '' with no
+    role set. With ``block`` (the text accepted_trade_alerts returned) the
+    deal itself is included, for when the ping goes to a channel that does
+    not also get the report.
+    """
     role = mentions.role()
     if not role:
         return ''
-    return '🔁 %s a trade just went through' % role
+    line = '🔁 %s a trade was accepted and is up for review' % role
+    if block:
+        details = block.split('\n', 1)[1] if '\n' in block else ''
+        if details.strip():
+            line = line + ':\n' + details.strip()
+    return line

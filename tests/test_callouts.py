@@ -356,7 +356,7 @@ class TestTradeAnnouncements:
     def test_first_run_announces_recent_trade_and_saves_state(self, tmp_path):
         act = trade(NOW - HOUR, [(A, B, FakePlayerObj('Josh Allen', 'QB')), (B, A, FakePlayerObj('Puka', 'WR'))])
         text = callouts.trade_announcements(FeedLeague([act]), str(tmp_path), now_ms=NOW)
-        assert text == 'Trade Alert\n\nAlpha sends: Josh Allen (QB)\nBravo sends: Puka (WR)'
+        assert text == 'Trade Complete\n\nAlpha sends: Josh Allen (QB)\nBravo sends: Puka (WR)'
         assert self.state(tmp_path) == {'last_seen': NOW, 'announced': [str(NOW - HOUR)]}
 
     def test_first_run_ignores_trades_older_than_bootstrap(self, tmp_path):
@@ -389,7 +389,7 @@ class TestTradeAnnouncements:
         newer = trade(NOW - HOUR, [(C, D, FakePlayerObj('Second', 'WR'))])
         older = trade(NOW - 2 * HOUR, [(A, B, FakePlayerObj('First', 'QB'))])
         text = callouts.trade_announcements(FeedLeague([newer, older]), str(tmp_path), now_ms=NOW)
-        assert text == 'Trade Alert (2 trades)\n\nAlpha sends: First (QB)\n\nCharlie sends: Second (WR)'
+        assert text == 'Trades Complete (2)\n\nAlpha sends: First (QB)\n\nCharlie sends: Second (WR)'
 
     def test_feed_error_announces_nothing_and_keeps_state(self, tmp_path):
         good = FeedLeague([])
@@ -418,7 +418,162 @@ class TestTradeAnnouncements:
 
 class TestTradeMention:
     def test_with_role(self):
-        assert callouts.trade_mention(callouts.Mentions(MAP, '999')) == '🔁 <@&999> a trade just went through'
+        assert callouts.trade_mention(callouts.Mentions(MAP, '999')) == \
+            '🔁 <@&999> a trade was accepted and is up for review'
 
     def test_without_role(self):
         assert callouts.trade_mention(callouts.Mentions(MAP)) == ''
+        assert callouts.trade_mention(callouts.Mentions(MAP), 'Trade Accepted\nAlpha sends: X') == ''
+
+    def test_with_block_includes_the_deal(self):
+        block = 'Trade Accepted - 24h to veto\n\nAlpha sends: Josh Allen\nBravo sends: Puka Nacua'
+        assert callouts.trade_mention(callouts.Mentions(MAP, '999'), block) == \
+            '🔁 <@&999> a trade was accepted and is up for review:\nAlpha sends: Josh Allen\nBravo sends: Puka Nacua'
+
+    def test_with_header_only_block(self):
+        assert callouts.trade_mention(callouts.Mentions(MAP, '999'), 'Trade Accepted') == \
+            '🔁 <@&999> a trade was accepted and is up for review'
+
+
+class FakeRequest:
+    """Stands in for league.espn_request: canned responses per view."""
+
+    def __init__(self, by_view):
+        self.by_view = by_view
+        self.calls = []
+
+    def league_get(self, params=None, headers=None, extend=''):
+        self.calls.append(dict(params or {}))
+        view = (params or {}).get('view')
+        value = self.by_view.get(view)
+        if callable(value):
+            return value(params)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+class RawLeague:
+    """A League with raw ESPN rows behind espn_request, for the accepted-trade tests."""
+
+    def __init__(self, transactions_by_period, pending=None, settings=None, period=3):
+        self.scoringPeriodId = period
+        self.player_map = {10: 'Josh Allen', 11: 'Puka Nacua', 12: 'Drake Maye'}
+        self.teams = [A, B, C, D]
+        by_view = {
+            'mTransactions2': lambda params: {'transactions': transactions_by_period.get(params.get('scoringPeriodId'), [])},
+            'mPendingTransactions': {'pendingTransactions': pending or []},
+            'mSettings': settings if settings is not None else {'settings': {'tradeSettings': {'revisionHours': 24}}},
+        }
+        self.espn_request = FakeRequest(by_view)
+
+    def get_team_data(self, team_id):
+        for t in self.teams:
+            if t.team_id == team_id:
+                return t
+        return None
+
+
+def accept_row(proposal_id, team_id, when, row_id='acc-' + '1'):
+    return {'id': row_id + proposal_id, 'type': 'TRADE_ACCEPT', 'status': None, 'teamId': team_id,
+            'relatedTransactionId': proposal_id, 'proposedDate': when, 'items': []}
+
+
+def proposal_row(proposal_id, items, status='PENDING'):
+    return {'id': proposal_id, 'type': 'TRADE_PROPOSAL', 'status': status, 'teamId': 1, 'items': items}
+
+
+ITEMS = [{'type': 'TRADE', 'fromTeamId': 1, 'toTeamId': 2, 'playerId': 10},
+         {'type': 'TRADE', 'fromTeamId': 2, 'toTeamId': 1, 'playerId': 11},
+         {'type': 'DROP', 'fromTeamId': 2, 'toTeamId': 0, 'playerId': 12}]
+
+
+class TestFormatProposal:
+    def test_players_and_drops(self):
+        league = RawLeague({})
+        assert callouts.format_proposal(league, proposal_row('p1', ITEMS)) == \
+            'Alpha sends: Josh Allen\nBravo sends: Puka Nacua\nBravo drops: Drake Maye'
+
+    def test_draft_pick_and_unknown_player(self):
+        league = RawLeague({})
+        items = [{'type': 'DRAFT_TRADE', 'fromTeamId': 3, 'toTeamId': 1, 'playerId': 0, 'overallPickNumber': 7},
+                 {'type': 'TRADE', 'fromTeamId': 1, 'toTeamId': 3, 'playerId': 999}]
+        assert callouts.format_proposal(league, proposal_row('p1', items)) == \
+            'Charlie sends: pick #7\nAlpha sends: Unknown'
+
+    def test_unknown_team_and_item_type(self):
+        league = RawLeague({})
+        items = [{'type': 'TRADE', 'fromTeamId': 9, 'toTeamId': 1, 'playerId': 10},
+                 {'type': 'SOMETHING_ELSE', 'fromTeamId': 1, 'toTeamId': 9, 'playerId': 11}]
+        assert callouts.format_proposal(league, proposal_row('p1', items)) == 'Team 9 sends: Josh Allen'
+
+    def test_no_items(self):
+        assert callouts.format_proposal(RawLeague({}), proposal_row('p1', [])) == ''
+
+
+class TestAcceptedTradeAlerts:
+    def state(self, tmp_path):
+        with open(os.path.join(str(tmp_path), callouts.TRADE_STATE_FILE)) as f:
+            return json.load(f)
+
+    def test_accepted_trade_with_visible_proposal(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR), proposal_row('p1', ITEMS)]})
+        text = callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW)
+        assert text == 'Trade Accepted - 24h to veto\n\n' \
+                       'Alpha sends: Josh Allen\nBravo sends: Puka Nacua\nBravo drops: Drake Maye'
+        assert self.state(tmp_path)['accepted'] == ['p1']
+
+    def test_reads_current_and_previous_period(self, tmp_path):
+        league = RawLeague({2: [accept_row('p1', 2, NOW - HOUR), proposal_row('p1', ITEMS)], 3: []})
+        assert 'Josh Allen' in callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW)
+        periods = [c.get('scoringPeriodId') for c in league.espn_request.calls if c.get('view') == 'mTransactions2']
+        assert periods == [2, 3]
+
+    def test_period_zero_does_not_go_negative(self, tmp_path):
+        league = RawLeague({0: []}, period=0)
+        callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW)
+        periods = [c.get('scoringPeriodId') for c in league.espn_request.calls if c.get('view') == 'mTransactions2']
+        assert periods == [0]
+
+    def test_proposal_found_in_pending_view(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR)]}, pending=[proposal_row('p1', ITEMS)])
+        assert 'Alpha sends: Josh Allen' in callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW)
+
+    def test_proposal_hidden_still_alerts(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR)]})
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW) == \
+            'Trade Accepted - 24h to veto\n\nBravo accepted a trade (ESPN has not shown the players yet)'
+
+    def test_not_repeated(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR), proposal_row('p1', ITEMS)]})
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW) != ''
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW + HOUR) == ''
+
+    def test_old_acceptances_never_announced(self, tmp_path):
+        old = NOW - callouts.TRADE_ACCEPT_MAX_AGE_MS
+        league = RawLeague({3: [accept_row('p1', 2, old), proposal_row('p1', ITEMS)]})
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW) == ''
+
+    def test_two_acceptances_oldest_first(self, tmp_path):
+        rows = [accept_row('p2', 4, NOW - HOUR), proposal_row('p2', [{'type': 'TRADE', 'fromTeamId': 3, 'toTeamId': 4, 'playerId': 11}]),
+                accept_row('p1', 2, NOW - 2 * HOUR), proposal_row('p1', ITEMS[:1])]
+        text = callouts.accepted_trade_alerts(RawLeague({3: rows}), str(tmp_path), now_ms=NOW)
+        assert text == 'Trades Accepted (2) - 24h to veto\n\nAlpha sends: Josh Allen\n\nCharlie sends: Puka Nacua'
+
+    def test_unreadable_settings_drops_the_hours(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR), proposal_row('p1', ITEMS)]},
+                           settings=Exception('nope'))
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW).startswith('Trade Accepted\n\n')
+
+    def test_transactions_error_is_quiet(self, tmp_path):
+        league = RawLeague({})
+        league.espn_request.by_view['mTransactions2'] = Exception('down')
+        assert callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW) == ''
+
+    def test_state_shares_file_with_completed_trades(self, tmp_path):
+        league = RawLeague({3: [accept_row('p1', 2, NOW - HOUR), proposal_row('p1', ITEMS)]})
+        callouts.accepted_trade_alerts(league, str(tmp_path), now_ms=NOW)
+        done = trade(NOW - HOUR, [(A, B, FakePlayerObj('Josh Allen', 'QB'))])
+        callouts.trade_announcements(FeedLeague([done]), str(tmp_path), now_ms=NOW)
+        state = self.state(tmp_path)
+        assert state['accepted'] == ['p1'] and state['announced'] == [str(NOW - HOUR)]
