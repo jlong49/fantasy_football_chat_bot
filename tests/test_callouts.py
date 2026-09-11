@@ -156,6 +156,19 @@ class TestLiveCallouts:
         assert '🔥' not in text
         assert text == '🔄 <@111> is up 55.00 on <@222>, but <@222> is still projected to win by 25.00 with 2 players left'
 
+    def test_comeback_needs_the_board_leader_to_be_nearly_done(self):
+        # Week is 69% played, but A's 100-20 lead is only because A had five
+        # on the early slate and B two. A still has four to play: no line.
+        boxes = [live(A, played(5, 20) + left(4, 10.0), B, played(2, 10) + left(7, 20.0)),
+                 live(C, played(9), D, played(9))]
+        assert callouts.live_callouts(boxes, self.M) == ''
+
+    def test_comeback_needs_most_of_the_matchup_played(self):
+        # A is done and projected to lose, but B has seven left (10 of 18 played).
+        boxes = [live(A, played(9, 5), B, played(1, 10) + left(7, 10.0) + [P(0, 10.0, played=False)]),
+                 live(C, played(9), D, played(9))]
+        assert '🔄' not in callouts.live_callouts(boxes, self.M)
+
     def test_comeback_needs_a_real_lead(self):
         # A up 10 on the board, projected to lose: not worth a line.
         boxes = [live(A, played(9, 10), B, played(7, 80 / 7) + left(2, 40.0))]

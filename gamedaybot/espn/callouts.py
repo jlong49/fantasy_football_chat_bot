@@ -26,17 +26,20 @@ logger = logging.getLogger(__name__)
 # No live callouts at all until this share of the week's starters has played.
 # Friday morning is one game in; Sunday 4 PM ET is the early window done.
 LIVE_MIN_PLAYED_FRACTION = 0.5
+# The comeback and coin-flip lines also need this share of the matchup's
+# own starters played, so an uneven Thursday/Sunday split between the two
+# teams cannot masquerade as a comeback or a nail-biter.
+MATCHUP_MIN_PLAYED = 0.75
+# A team with this many starters or fewer left is "nearly done".
+NEARLY_DONE_LEFT = 2
 # "DESTROYING": projected margin at least this, the leader is also the
-# projected winner, and the trailer has at most this many starters left.
+# projected winner, and the trailer is nearly done.
 DESTROYING_MARGIN = 30
-DESTROYING_MAX_LEFT = 2
 # "Comeback watch": the team ahead on the board by at least this much is
-# still projected to lose.
+# nearly done and still projected to lose.
 COMEBACK_MIN_LEAD = 15
-# "Coin flip": projected margin under this, with at least this share of the
-# matchup's starters already played and someone still left to play.
+# "Coin flip": projected margin under this, with someone still left to play.
 COIN_FLIP_MARGIN = 5
-COIN_FLIP_MIN_PLAYED = 0.75
 
 # Activity-feed topics scanned per trade check. ESPN returns newest first, so
 # this only needs to cover the trades that can clear between two hourly runs.
@@ -215,12 +218,13 @@ def live_callouts(box_scores, mentions):
     fits it:
 
     - DESTROYING: the leader is also the projected winner, by at least
-      DESTROYING_MARGIN, and the trailer has DESTROYING_MAX_LEFT or fewer
+      DESTROYING_MARGIN, and the trailer has NEARLY_DONE_LEFT or fewer
       starters left.
     - Comeback watch: the team ahead on the board by COMEBACK_MIN_LEAD or
-      more is still projected to lose.
-    - Coin flip: projected margin under COIN_FLIP_MARGIN, most of the
-      matchup already played, and someone still left to play.
+      more is nearly done and still projected to lose, in a matchup that is
+      at least MATCHUP_MIN_PLAYED played.
+    - Coin flip: projected margin under COIN_FLIP_MARGIN, the matchup at
+      least MATCHUP_MIN_PLAYED played, and someone still left to play.
 
     Nothing is said before LIVE_MIN_PLAYED_FRACTION of the week's starters
     have played, and finished matchups are left for Tuesday's final.
@@ -256,7 +260,7 @@ def live_callouts(box_scores, mentions):
         actual = m.actual_leader()
         if proj is None or actual is None or proj[0] is not actual[0]:
             continue
-        if m.proj_margin < DESTROYING_MARGIN or proj[2] > DESTROYING_MAX_LEFT:
+        if m.proj_margin < DESTROYING_MARGIN or proj[2] > NEARLY_DONE_LEFT:
             continue
         if destroying is None or m.proj_margin > destroying[0].proj_margin:
             destroying = (m, proj)
@@ -272,7 +276,12 @@ def live_callouts(box_scores, mentions):
         actual = m.actual_leader()
         if proj is None or actual is None or proj[0] is actual[0]:
             continue
-        if m.actual_margin < COMEBACK_MIN_LEAD:
+        if m.actual_margin < COMEBACK_MIN_LEAD or m.played_fraction < MATCHUP_MIN_PLAYED:
+            continue
+        # Only a lead the leader can no longer add much to. Otherwise this is
+        # just one side having had more players on the early slate.
+        board_leader_left = m.home_left if actual[0] is m.home else m.away_left
+        if board_leader_left > NEARLY_DONE_LEFT:
             continue
         if comeback is None or m.actual_margin > comeback[0].actual_margin:
             comeback = (m, proj, actual)
@@ -285,7 +294,7 @@ def live_callouts(box_scores, mentions):
 
     coin_flip = None
     for m in matchups:
-        if m.proj_margin >= COIN_FLIP_MARGIN or m.played_fraction < COIN_FLIP_MIN_PLAYED:
+        if m.proj_margin >= COIN_FLIP_MARGIN or m.played_fraction < MATCHUP_MIN_PLAYED:
             continue
         if coin_flip is None or m.proj_margin < coin_flip.proj_margin:
             coin_flip = m
