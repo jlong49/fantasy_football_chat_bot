@@ -1,5 +1,6 @@
 import os
 import gamedaybot.espn.functionality as espn
+import gamedaybot.espn.callouts as callouts
 import gamedaybot.utils.util as utils
 
 
@@ -122,6 +123,16 @@ def get_env_vars():
         waiver_report = False
 
     data['waiver_report'] = waiver_report
+
+    # Discord-only extras. ESPN team id -> Discord user id pairs drive the
+    # @mention callouts; the role id is pinged for league-wide announcements
+    # such as trades. Both are optional and change nothing when unset.
+    data['discord_team_mentions'] = callouts.parse_team_mentions(os.environ.get("DISCORD_TEAM_MENTIONS", ""))
+    data['discord_announce_role_id'] = os.environ.get("DISCORD_ANNOUNCE_ROLE_ID", "")
+
+    # Where the trade announcer keeps its "already announced" file. /tmp is
+    # fine for a long-lived container; point it at a volume to survive restarts.
+    data['state_dir'] = os.environ.get("STATE_DIR", "/tmp")
 
     try:
         data['init_msg'] = os.environ["INIT_MSG"]

@@ -134,9 +134,18 @@ to `END_DATE`, and the bot goes quiet once the league's matchup periods are over
 | Standings | Wed | 7:30 AM local | Current standings |
 | Waiver Report | Wed | 7:31 AM local | Every add/drop from the day, with FAAB bids and the outbid rival in FAAB leagues |
 | Matchups + projections | Thu | 7:30 PM ET | Next week's matchups with records |
+| Trade Alert | Any | Hourly | Every trade that cleared in the last hour, one line per side, read from the league activity feed |
 
 Optional: `DAILY_WAIVER` moves the Waiver Report to a daily send, and `MONITOR_REPORT`
 (on by default) controls the Sunday Players to Monitor message.
+
+**Discord @mentions.** Set `DISCORD_TEAM_MENTIONS` and the Sunday/Monday scoreboards
+gain a trash-talk line under the code block that pings the owners involved
+("🔥 @you is DESTROYING @them by 48.20", plus the tightest game when it's within 10),
+and the Tuesday final pings the top score, the low score, the biggest win and the
+worst bench manager. Set `DISCORD_ANNOUNCE_ROLE_ID` and Trade Alerts ping that role.
+Mentions can't render inside Discord code blocks, which is why these lines sit
+beneath the report rather than in it.
 
 The managed schedule - including the daily Waiver Report and the Elite chart messages -
 is at [gamedaybot.com/message-schedule](https://www.gamedaybot.com/message-schedule/).
@@ -405,6 +414,9 @@ the rest have defaults.
 | `DAILY_WAIVER` | No | `False` | Send the Waiver Report daily rather than only on Wednesday |
 | `CLOSE_SCORES_THRESHOLD` | No | `15` | Largest projected point gap that still counts as a close matchup. Lower it for fewer, tighter games. A value that isn't a whole number is ignored |
 | `INIT_MSG` | No | - | Message posted on startup. Leave unset for a silent start - the process restarts more often than you'd think |
+| `DISCORD_TEAM_MENTIONS` | No | - | Discord only. `team_id:user_id` pairs, comma-separated (`1:393143738374946817,2:...`), mapping ESPN team ids to Discord user ids. Turns on the @mention callouts under scoreboards and the Tuesday final |
+| `DISCORD_ANNOUNCE_ROLE_ID` | No | - | Discord only. Role id pinged for league-wide announcements (trades) |
+| `STATE_DIR` | No | `/tmp` | Writable directory for the trade announcer's "already announced" file. Point it at a volume to survive restarts |
 
 Two older variables, `WAIVER_REPORT` and `TEST`, are still read but no longer do
 anything - leave them unset. `RANDOM_PHRASE` and `TOP_HALF_SCORING` have been removed
@@ -513,7 +525,8 @@ python3 -c "from gamedaybot.espn.espn_bot import espn_bot; espn_bot('get_standin
 
 Valid names: `get_scoreboard_short`, `get_projected_scoreboard`, `get_matchups`,
 `get_monitor`, `get_close_scores`, `get_power_rankings`, `get_trophies`, `get_standings`,
-`get_final`, `get_waiver_report`, `win_matrix`, `trophy_recap`, `init`.
+`get_final`, `get_waiver_report`, `get_trade_announcements`, `win_matrix`, `trophy_recap`,
+`init`.
 
 `win_matrix` (how the standings would look if everyone played everyone) and
 `trophy_recap` (season-long trophy tally) aren't on the schedule - they're on-demand

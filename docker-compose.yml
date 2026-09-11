@@ -28,3 +28,9 @@ services:
       # ESPN_S2:
       # #Used for private leagues. See Private Leagues Section for documentation
       # SWID:
+      # #Discord only: ESPN team id -> Discord user id pairs, for @mention callouts
+      # DISCORD_TEAM_MENTIONS: "1:393143738374946817,2:192444104804794368"
+      # #Discord only: role id pinged for trade announcements
+      # DISCORD_ANNOUNCE_ROLE_ID:
+      # #Writable dir for the trade announcer's state file (default /tmp)
+      # STATE_DIR:

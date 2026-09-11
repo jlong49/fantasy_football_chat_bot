@@ -31,6 +31,7 @@ def scheduler():
     # score update:                       friday, monday, and tuesday morning at 7:30am local time.
     # player monitor report:              sunday morning at 7:30am local time.
     # score update:                       sunday at 4pm, 8pm east coast time.
+    # trade announcements:                every hour at :07, so a trade is called out within the hour it clears.
 
     sched.add_job(espn_bot, 'cron', ['get_close_scores'], id='close_scores',
                   day_of_week='mon', hour=18, minute=30, start_date=ff_start_date, end_date=ff_end_date,
@@ -63,6 +64,10 @@ def scheduler():
 
     sched.add_job(espn_bot, 'cron', ['get_scoreboard_short'], id='scoreboard2',
                   day_of_week='sun', hour='16,20', start_date=ff_start_date, end_date=ff_end_date,
+                  timezone=game_timezone, replace_existing=True)
+
+    sched.add_job(espn_bot, 'cron', ['get_trade_announcements'], id='trades',
+                  minute=7, start_date=ff_start_date, end_date=ff_end_date,
                   timezone=game_timezone, replace_existing=True)
 
     print("Ready!")

@@ -35,14 +35,19 @@ class Discord(object):
     def __repr__(self):
         return "Discord Webhook Url(%s)" % self.webhook_url
 
-    def send_message(self, text):
+    def send_message(self, text, mention_text=None):
         """
         Sends a message to the Discord channel.
 
         Parameters
         ----------
         text : str
-            The message to be sent to the Discord channel.
+            The message to be sent to the Discord channel. It is wrapped in a
+            code block, inside which Discord renders no mentions.
+        mention_text : str, optional
+            Lines appended after the code block as ordinary text, so that
+            ``<@user>`` and ``<@&role>`` markup in them pings people. Only
+            user and role mentions are allowed through; @everyone is not.
 
         Returns
         -------
@@ -56,8 +61,11 @@ class Discord(object):
         """
 
         message = "```{0}```".format(text)
+        if mention_text:
+            message = message + "\n" + mention_text
         template = {
-            "content": message  # limit 3000 chars
+            "content": message,  # limit 3000 chars
+            "allowed_mentions": {"parse": ["users", "roles"]},
         }
 
         headers = {'content-type': 'application/json'}

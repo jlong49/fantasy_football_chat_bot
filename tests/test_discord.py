@@ -19,6 +19,24 @@ class TestDiscord:
         mock_requests.post(self.url, status_code=204)
         assert self.test_bot.send_message(self.test_text).status_code == 204
 
+    def test_wraps_text_in_code_block_and_blocks_everyone(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        self.test_bot.send_message(self.test_text)
+        body = mock_requests.last_request.json()
+        assert body['content'] == '```This is a test.```'
+        assert body['allowed_mentions'] == {'parse': ['users', 'roles']}
+
+    def test_mention_text_lands_outside_the_code_block(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        self.test_bot.send_message(self.test_text, mention_text='<@1> is DESTROYING <@2>')
+        assert mock_requests.last_request.json()['content'] == \
+            '```This is a test.```\n<@1> is DESTROYING <@2>'
+
+    def test_empty_mention_text_adds_nothing(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        self.test_bot.send_message(self.test_text, mention_text='')
+        assert mock_requests.last_request.json()['content'] == '```This is a test.```'
+
     def test_bad_bot_id(self, mock_requests):
         '''Does the expected error raise when a bot id is incorrect?'''
         mock_requests.post(self.url, status_code=404)
