@@ -693,3 +693,169 @@ def trade_mention(mentions, block=None):
         if details.strip():
             line = line + ':\n' + details.strip()
     return line
+
+
+# ---------------------------------------------------------------------------
+# Discussion-channel extras
+# ---------------------------------------------------------------------------
+
+# Streaks shorter than this are not worth a line.
+STREAK_MIN = 3
+
+
+def _remaining_starters(lineup):
+    return [p for p in lineup if _is_starter(p) and p.game_played < 100]
+
+
+def night_watch(box_scores):
+    """
+    Every matchup still undecided, with the players each side has left.
+
+    Meant for Monday evening, when only the Monday night game remains, but it
+    works any time: a matchup is listed as long as either side has a starter
+    whose game has not finished. Closest game first.
+
+    Returns
+    -------
+    str
+        A block for a code fence, or '' when every matchup is final.
+    """
+    entries = []
+    for box in box_scores:
+        if espn.is_bye_box(box):
+            continue
+        home_left = _remaining_starters(box.home_lineup)
+        away_left = _remaining_starters(box.away_lineup)
+        if not home_left and not away_left:
+            continue
+        margin = box.home_score - box.away_score
+        if margin > 0:
+            status = '%s up %.2f' % (box.home_team.team_abbrev, margin)
+        elif margin < 0:
+            status = '%s up %.2f' % (box.away_team.team_abbrev, -margin)
+        else:
+            status = 'tied'
+        lines = ['%s %.2f - %.2f %s  (%s)' % (box.home_team.team_abbrev, box.home_score,
+                                            box.away_score, box.away_team.team_abbrev, status)]
+        for team, left in ((box.home_team, home_left), (box.away_team, away_left)):
+            if left:
+                names = ', '.join('%s %s' % (getattr(p, 'position', ''), p.name) for p in left)
+                proj = sum((p.projected_points or 0) for p in left)
+                lines.append('  %s: %s  (%.1f proj)' % (team.team_abbrev, names, proj))
+            else:
+                lines.append('  %s: nobody left' % team.team_abbrev)
+        entries.append((abs(margin), '\n'.join(lines)))
+    if not entries:
+        return ''
+    entries.sort(key=lambda e: e[0])
+    return '\n'.join(['Monday Night Watch'] + [text for _, text in entries])
+
+
+def lineup_regret(box_scores, mentions):
+    """
+    The bench decision that cost someone their matchup this week: a benched
+    player who outscored a started player at the same position by more than
+    the losing margin. The biggest such swing in the league gets the line.
+
+    Only same-position swaps count (a bench WR for a started WR, including a
+    WR in a flex slot), so every regret named was a legal lineup.
+
+    Returns
+    -------
+    str
+        One line, or '' when no swap would have flipped a result.
+    """
+    if not mentions.has_teams:
+        return ''
+    best = None  # (gain, loser, bench_player, starter, margin)
+    for box in box_scores:
+        if espn.is_bye_box(box):
+            continue
+        margin = box.home_score - box.away_score
+        if margin == 0:
+            continue
+        loser, lineup = (box.away_team, box.away_lineup) if margin > 0 else (box.home_team, box.home_lineup)
+        margin = abs(margin)
+        starters = [p for p in lineup if _is_starter(p)]
+        for bench in (p for p in lineup if p.slot_position == 'BE'):
+            for starter in starters:
+                if getattr(starter, 'position', None) != getattr(bench, 'position', None):
+                    continue
+                gain = bench.points - starter.points
+                if gain > margin and (best is None or gain > best[0]):
+                    best = (gain, loser, bench, starter, margin)
+    if best is None:
+        return ''
+    gain, loser, bench, starter, margin = best
+    return '🤦 %s benched %s (%.1f) for %s (%.1f) and lost by %.2f' % (
+        mentions.team(loser), bench.name, bench.points, starter.name, starter.points, margin)
+
+
+def player_of_the_week(box_scores, mentions):
+    """
+    The started player who beat his projection by the most, and the one who
+    missed it by the most. Bench and IR players are not considered: a waiver
+    pickup going off for nobody is not interesting.
+
+    Returns
+    -------
+    str
+        Two lines, or '' when nothing was started.
+    """
+    if not mentions.has_teams:
+        return ''
+    best = worst = None  # (diff, player, team)
+    for box in box_scores:
+        if espn.is_bye_box(box):
+            continue
+        for team, lineup in ((box.home_team, box.home_lineup), (box.away_team, box.away_lineup)):
+            for p in lineup:
+                if not _is_starter(p) or getattr(p, 'projected_points', None) is None:
+                    continue
+                diff = p.points - p.projected_points
+                if best is None or diff > best[0]:
+                    best = (diff, p, team)
+                if worst is None or diff < worst[0]:
+                    worst = (diff, p, team)
+    if best is None:
+        return ''
+    lines = []
+    diff, p, team = best
+    lines.append('⭐ Player of the week: %s (%s) %.1f for %s, projected %.1f' %
+                 (p.name, getattr(p, 'position', ''), p.points, mentions.team(team), p.projected_points))
+    diff, p, team = worst
+    if worst[1] is not best[1]:
+        lines.append('🧊 Bust of the week: %s (%s) %.1f for %s, projected %.1f' %
+                     (p.name, getattr(p, 'position', ''), p.points, mentions.team(team), p.projected_points))
+    return '\n'.join(lines)
+
+
+def streak_watch(league, box_scores, mentions):
+    """
+    Teams riding a win or loss streak of STREAK_MIN or more into this week,
+    with who they play. For the Thursday matchups post. Longest first.
+    """
+    if not mentions.has_teams:
+        return ''
+    opponent = {}
+    for box in box_scores:
+        if espn.is_bye_box(box):
+            continue
+        opponent[box.home_team.team_id] = box.away_team
+        opponent[box.away_team.team_id] = box.home_team
+    streaks = []
+    for team in league.teams:
+        length = getattr(team, 'streak_length', 0) or 0
+        kind = getattr(team, 'streak_type', '')
+        if length >= STREAK_MIN and kind in ('WIN', 'LOSS'):
+            streaks.append((length, kind, team))
+    streaks.sort(key=lambda s: -s[0])
+    lines = []
+    for length, kind, team in streaks:
+        opp = opponent.get(team.team_id)
+        versus = ' against %s' % mentions.team(opp) if opp else ''
+        if kind == 'WIN':
+            lines.append('🔥 %s rides a %d-game win streak into this week%s' % (mentions.team(team), length, versus))
+        else:
+            lines.append('🧊 %s has dropped %d straight%s' % (mentions.team(team), length, versus))
+    return '\n'.join(lines)

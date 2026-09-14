@@ -82,6 +82,8 @@ def espn_bot(function):
     season_recap: once the season is over, posts the end-of-season recap (standings, superlatives,
         trophy case, luck, all-play, bench points) to the mention channel if there is one.
     season_recap_now: the same recap for the season so far, on demand.
+    get_night_watch: every undecided matchup with the players each side has left, to the
+        mention channel if there is one.
     get_trade_announcements: sends any trade accepted since the last check (pinging the
         announce role, since the league's veto window is open) and any trade that has
         since completed.
@@ -173,6 +175,7 @@ def espn_bot(function):
         text = espn.get_matchups(league, box_scores=box_scores)
         if text != util.NO_MATCHUP_DATA:
             text = text + "\n\n" + espn.get_projected_scoreboard(league, box_scores=box_scores)
+            mention_text = callouts.streak_watch(league, box_scores, mentions)
     elif function == "get_monitor":
         text = espn.get_monitor(league)
     elif function == "get_scoreboard_short":
@@ -225,7 +228,17 @@ def espn_bot(function):
         else:
             text = "Final " + scores
             text = text + "\n\n" + espn.get_trophies(league, week=week, box_scores=box_scores)
-            mention_text = callouts.final_callouts(league, week, box_scores, mentions)
+            mention_text = '\n'.join(part for part in (
+                callouts.final_callouts(league, week, box_scores, mentions),
+                callouts.player_of_the_week(box_scores, mentions),
+                callouts.lineup_regret(box_scores, mentions),
+            ) if part)
+    elif function == "get_night_watch":
+        # Who still has players to play, to the discussion channel.
+        box_scores = espn.fetch_box_scores(league)
+        _broadcast(callouts.night_watch(box_scores), '', str_limit, groupme_bot, slack_bot, discord_bot,
+                   discord_channel='mentions')
+        return
     elif function == "get_waiver_report":
         faab = league.settings.faab
         text = espn.get_waiver_report(league, faab)

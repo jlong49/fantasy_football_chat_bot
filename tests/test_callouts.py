@@ -594,3 +594,144 @@ class TestAcceptedTradeAlerts:
         callouts.trade_announcements(FeedLeague([done]), str(tmp_path), now_ms=NOW)
         state = self.state(tmp_path)
         assert state['accepted'] == ['p1'] and state['announced'] == [str(NOW - HOUR)]
+
+
+def named(position, slot, points, projected=None, played=True, name=None):
+    p = P(points, projected, played=played, slot=slot)
+    p.position = position
+    p.name = name or ('%s%d' % (position, int(points)))
+    return p
+
+
+class TestNightWatch:
+    def test_lists_undecided_matchups_closest_first(self):
+        boxes = [
+            live(A, [named('QB', 'QB', 90)] + [named('TE', 'TE', 0, 11.2, played=False, name='Kelce')],
+                 B, [named('QB', 'QB', 100)]),
+            live(C, [named('RB', 'RB', 50)],
+                 D, [named('RB', 'RB', 20), named('WR', 'WR', 0, 9.5, played=False, name='Hill'),
+                     named('K', 'K', 0, 8.0, played=False, name='Butker')]),
+        ]
+        assert callouts.night_watch(boxes) == '\n'.join([
+            'Monday Night Watch',
+            'AAA 90.00 - 100.00 BBB  (BBB up 10.00)',
+            '  AAA: TE Kelce  (11.2 proj)',
+            '  BBB: nobody left',
+            'CCC 50.00 - 20.00 DDD  (CCC up 30.00)',
+            '  CCC: nobody left',
+            '  DDD: WR Hill, K Butker  (17.5 proj)',
+        ]).replace('AAA', 'ALPH').replace('BBB', 'BRAV').replace('CCC', 'CHAR').replace('DDD', 'DELT')
+
+    def test_tied(self):
+        boxes = [live(A, [named('QB', 'QB', 50), named('TE', 'TE', 0, 5, played=False, name='X')],
+                      B, [named('QB', 'QB', 50)])]
+        assert '(tied)' in callouts.night_watch(boxes)
+
+    def test_finished_and_bye_matchups_skipped(self):
+        boxes = [live(A, [named('QB', 'QB', 50)], B, [named('QB', 'QB', 40)]),
+                 FakeBox(C, 10, None, 0, [named('QB', 'QB', 0, played=False)], [])]
+        assert callouts.night_watch(boxes) == ''
+
+    def test_bench_players_do_not_count_as_left(self):
+        boxes = [live(A, [named('QB', 'QB', 50), named('RB', 'BE', 0, played=False)], B, [named('QB', 'QB', 40)])]
+        assert callouts.night_watch(boxes) == ''
+
+
+class TestLineupRegret:
+    M = callouts.Mentions(MAP)
+
+    def test_flipped_result_named(self):
+        # B lost by 6; benched a 24.3 WR behind a 6.1 WR: +18.2 would have flipped it.
+        boxes = [live(A, [named('QB', 'QB', 100)],
+                      B, [named('QB', 'QB', 87.9), named('WR', 'WR', 6.1, name='Dud'),
+                          named('WR', 'BE', 24.3, name='Stud')])]
+        assert callouts.lineup_regret(boxes, self.M) == \
+            '🤦 <@222> benched Stud (24.3) for Dud (6.1) and lost by 6.00'
+
+    def test_swap_that_would_not_flip_is_ignored(self):
+        boxes = [live(A, [named('QB', 'QB', 100)],
+                      B, [named('QB', 'QB', 60), named('WR', 'WR', 6.1, name='Dud'), named('WR', 'BE', 24.3, name='Stud')])]
+        assert callouts.lineup_regret(boxes, self.M) == ''
+
+    def test_only_same_position_swaps(self):
+        boxes = [live(A, [named('QB', 'QB', 100)],
+                      B, [named('QB', 'QB', 90), named('WR', 'WR', 6.1, name='Dud'), named('RB', 'BE', 40, name='Stud')])]
+        assert callouts.lineup_regret(boxes, self.M) == ''
+
+    def test_biggest_swing_wins(self):
+        boxes = [live(A, [named('QB', 'QB', 100)],
+                      B, [named('QB', 'QB', 95), named('WR', 'WR', 6, name='Dud'), named('WR', 'BE', 20, name='Stud')]),
+                 live(C, [named('QB', 'QB', 100)],
+                      D, [named('QB', 'QB', 95), named('RB', 'RB', 2, name='Worse'), named('RB', 'BE', 30, name='Best')])]
+        assert callouts.lineup_regret(boxes, self.M).startswith('🤦 Delta benched Best (30.0) for Worse (2.0)')
+
+    def test_winner_has_no_regret(self):
+        boxes = [live(A, [named('QB', 'QB', 100), named('WR', 'WR', 1, name='Dud'), named('WR', 'BE', 30, name='Stud')],
+                      B, [named('QB', 'QB', 50)])]
+        assert callouts.lineup_regret(boxes, self.M) == ''
+
+    def test_no_mapping(self):
+        assert callouts.lineup_regret([], callouts.Mentions({})) == ''
+
+
+class TestPlayerOfTheWeek:
+    M = callouts.Mentions(MAP)
+
+    def test_best_and_worst_starters(self):
+        boxes = [live(A, [named('WR', 'WR', 38.4, 16.1, name='Chase'), named('RB', 'BE', 60, 5, name='Bench Guy')],
+                      B, [named('QB', 'QB', 2.1, 18.5, name='Flop'), named('TE', 'TE', 10, 10, name='Meh')])]
+        assert callouts.player_of_the_week(boxes, self.M) == \
+            '⭐ Player of the week: Chase (WR) 38.4 for <@111>, projected 16.1\n' \
+            '🧊 Bust of the week: Flop (QB) 2.1 for <@222>, projected 18.5'
+
+    def test_bench_and_ir_ignored(self):
+        boxes = [live(A, [named('WR', 'WR', 10, 10, name='Only'), named('RB', 'BE', 60, 5, name='Bench'),
+                          named('QB', 'IR', 0, 20, name='Hurt')],
+                      B, [named('WR', 'WR', 10, 10, name='Also')])]
+        text = callouts.player_of_the_week(boxes, self.M)
+        assert 'Bench' not in text and 'Hurt' not in text
+
+    def test_single_starter_is_not_also_the_bust(self):
+        boxes = [live(A, [named('WR', 'WR', 30, 10, name='Solo')], B, [])]
+        assert callouts.player_of_the_week(boxes, self.M).count('\n') == 0
+
+    def test_empty(self):
+        assert callouts.player_of_the_week([], self.M) == ''
+        assert callouts.player_of_the_week([], callouts.Mentions({})) == ''
+
+
+class StreakTeam(FakeTeam):
+    def __init__(self, team_id, name, length, kind):
+        FakeTeam.__init__(self, team_id, name)
+        self.streak_length = length
+        self.streak_type = kind
+
+
+class StreakLeague:
+    def __init__(self, teams):
+        self.teams = teams
+
+
+class TestStreakWatch:
+    M = callouts.Mentions(MAP)
+
+    def test_streaks_with_opponents_longest_first(self):
+        a = StreakTeam(1, 'Alpha', 3, 'WIN')
+        b = StreakTeam(2, 'Bravo', 5, 'LOSS')
+        c = StreakTeam(3, 'Charlie', 2, 'WIN')
+        d = StreakTeam(4, 'Delta', 1, 'LOSS')
+        boxes = [live(a, [], b, []), live(c, [], d, [])]
+        assert callouts.streak_watch(StreakLeague([a, b, c, d]), boxes, self.M) == \
+            '🧊 <@222> has dropped 5 straight against <@111>\n' \
+            '🔥 <@111> rides a 3-game win streak into this week against <@222>'
+
+    def test_no_opponent_this_week(self):
+        a = StreakTeam(1, 'Alpha', 4, 'WIN')
+        assert callouts.streak_watch(StreakLeague([a]), [], self.M) == \
+            '🔥 <@111> rides a 4-game win streak into this week'
+
+    def test_nothing_below_threshold(self):
+        assert callouts.streak_watch(StreakLeague([StreakTeam(1, 'Alpha', 2, 'WIN')]), [], self.M) == ''
+
+    def test_no_mapping(self):
+        assert callouts.streak_watch(StreakLeague([StreakTeam(1, 'Alpha', 9, 'WIN')]), [], callouts.Mentions({})) == ''
