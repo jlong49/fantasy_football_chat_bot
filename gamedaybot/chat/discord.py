@@ -29,8 +29,11 @@ class Discord(object):
         Sends a message to the Discord channel.
     """
 
-    def __init__(self, webhook_url, mention_webhook_url=None):
+    def __init__(self, webhook_url, mention_webhook_url=None, notify_users=True):
         self.webhook_url = webhook_url
+        # False renders <@id> markup as a name without notifying the person.
+        # Role mentions always notify; they are only used for the trade ping.
+        self.notify_users = notify_users
         # When set, mention text is posted here as its own message (say, the
         # league's discussion channel) instead of under the report.
         self.mention_webhook_url = mention_webhook_url if mention_webhook_url not in (None, 1, "1", '') else None
@@ -88,8 +91,8 @@ class Discord(object):
 
     def _post(self, url, content):
         template = {
-            "content": content,  # limit 3000 chars
-            "allowed_mentions": {"parse": ["users", "roles"]},
+            "content": content,  # limit 2000 chars
+            "allowed_mentions": {"parse": ["users", "roles"] if self.notify_users else ["roles"]},
         }
         headers = {'content-type': 'application/json'}
         r = requests.post(url, data=json.dumps(template), headers=headers)

@@ -131,6 +131,8 @@ def get_env_vars():
     # such as trades. Both are optional and change nothing when unset.
     data['discord_team_mentions'] = callouts.parse_team_mentions(os.environ.get("DISCORD_TEAM_MENTIONS", ""))
     data['discord_announce_role_id'] = os.environ.get("DISCORD_ANNOUNCE_ROLE_ID", "")
+    # ping (notify), silent (blue @name, no notification) or names (team names).
+    data['discord_mention_style'] = callouts.parse_mention_style(os.environ.get("DISCORD_MENTION_STYLE", ""))
     # Optional second webhook. When set, the mention lines go there as their
     # own short messages and the reports stay in DISCORD_WEBHOOK_URL's channel.
     data['discord_mention_webhook_url'] = os.environ.get("DISCORD_MENTION_WEBHOOK_URL", "")

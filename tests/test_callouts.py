@@ -78,6 +78,23 @@ class TestMentions:
         assert callouts.Mentions(MAP).role() == ''
         assert callouts.Mentions(MAP, '  ').role() == ''
 
+    def test_silent_style_keeps_markup_but_not_notifications(self):
+        m = callouts.Mentions(MAP, style='silent')
+        assert m.team(A) == '<@111>' and not m.notify_users and m.has_teams
+
+    def test_names_style_uses_team_names(self):
+        m = callouts.Mentions(MAP, style='names')
+        assert m.team(A) == 'Alpha' and not m.notify_users and m.has_teams
+
+    def test_ping_style_default(self):
+        assert callouts.Mentions(MAP).notify_users
+        assert callouts.Mentions(MAP, style='bogus').style == 'ping'
+
+    def test_parse_mention_style(self):
+        assert callouts.parse_mention_style(' Silent ') == 'silent'
+        assert callouts.parse_mention_style('') == 'ping'
+        assert callouts.parse_mention_style('nope') == 'ping'
+
     def test_has_teams(self):
         assert callouts.Mentions(MAP).has_teams
         assert not callouts.Mentions({}).has_teams

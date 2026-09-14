@@ -98,6 +98,24 @@ def parse_team_mentions(raw):
     return mapping
 
 
+# How people are named in the callout lines (DISCORD_MENTION_STYLE):
+#   ping   - <@id> markup and a notification to that person
+#   silent - the same <@id> markup, rendered as a blue @name, but Discord is
+#            told not to notify anyone (allowed_mentions without users)
+#   names  - the team name, no Discord markup at all
+MENTION_STYLES = ('ping', 'silent', 'names')
+DEFAULT_MENTION_STYLE = 'ping'
+
+
+def parse_mention_style(raw):
+    style = (raw or '').strip().lower()
+    if style in MENTION_STYLES:
+        return style
+    if style:
+        logger.warning("Unknown DISCORD_MENTION_STYLE %r; using %s", raw, DEFAULT_MENTION_STYLE)
+    return DEFAULT_MENTION_STYLE
+
+
 class Mentions(object):
     """
     Renders teams and the league role as Discord mentions.
@@ -108,20 +126,29 @@ class Mentions(object):
         {espn_team_id: discord_user_id}, as parse_team_mentions returns.
     role_id : str, optional
         Discord role id to ping for league-wide announcements.
+    style : str, optional
+        One of MENTION_STYLES; see the comment above.
     """
 
-    def __init__(self, team_mentions=None, role_id=None):
+    def __init__(self, team_mentions=None, role_id=None, style=DEFAULT_MENTION_STYLE):
         self.team_mentions = dict(team_mentions or {})
         self.role_id = str(role_id).strip() if role_id else ''
+        self.style = style if style in MENTION_STYLES else DEFAULT_MENTION_STYLE
 
     @property
     def has_teams(self):
+        """Whether the callout lines are on at all. They need a mapping, even in 'names' style."""
         return bool(self.team_mentions)
 
+    @property
+    def notify_users(self):
+        """Whether Discord should actually notify the people named."""
+        return self.style == 'ping'
+
     def team(self, team):
-        """The team's owner as ``<@id>``, or the plain team name if unmapped."""
+        """The team's owner as ``<@id>``, or the plain team name if unmapped or in 'names' style."""
         user_id = self.team_mentions.get(getattr(team, 'team_id', None))
-        if user_id:
+        if user_id and self.style != 'names':
             return '<@%s>' % user_id
         return team.team_name
 

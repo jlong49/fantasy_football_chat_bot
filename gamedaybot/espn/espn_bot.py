@@ -145,7 +145,9 @@ def espn_bot(function):
 
     groupme_bot = GroupMe(bot_id)
     slack_bot = Slack(slack_webhook_url)
-    discord_bot = Discord(discord_webhook_url, data.get('discord_mention_webhook_url'))
+    mentions = callouts.Mentions(data.get('discord_team_mentions'), data.get('discord_announce_role_id'),
+                                 data.get('discord_mention_style', callouts.DEFAULT_MENTION_STYLE))
+    discord_bot = Discord(discord_webhook_url, data.get('discord_mention_webhook_url'), mentions.notify_users)
 
     if swid == '{1}' or espn_s2 == '1':
         league = League(league_id=league_id, year=year)
@@ -161,8 +163,6 @@ def espn_bot(function):
     if function not in ["init", "broadcast", "win_matrix", "trophy_recap", "season_recap", "season_recap_now"] and (league.scoringPeriodId > league.finalScoringPeriod or league.scoringPeriodId < league.firstScoringPeriod):
         logger.info("Not in active season")
         return
-
-    mentions = callouts.Mentions(data.get('discord_team_mentions'), data.get('discord_announce_role_id'))
 
     text = ''
     mention_text = ''

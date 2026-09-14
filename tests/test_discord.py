@@ -70,6 +70,13 @@ class TestDiscord:
         assert [r.url for r in mock_requests.request_history] == [self.url]
         assert mock_requests.last_request.json()['content'] == '```This is a test.```\n<@1> wins'
 
+    def test_silent_mode_allows_roles_only(self, mock_requests):
+        mock_requests.post(self.url, status_code=204)
+        Discord(self.url, notify_users=False).send_message(self.test_text, mention_text='<@1> wins')
+        body = mock_requests.last_request.json()
+        assert body['content'] == '```This is a test.```\n<@1> wins'
+        assert body['allowed_mentions'] == {'parse': ['roles']}
+
     def test_bad_bot_id(self, mock_requests):
         '''Does the expected error raise when a bot id is incorrect?'''
         mock_requests.post(self.url, status_code=404)

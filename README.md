@@ -422,6 +422,7 @@ the rest have defaults.
 | `CLOSE_SCORES_THRESHOLD` | No | `15` | Largest projected point gap that still counts as a close matchup. Lower it for fewer, tighter games. A value that isn't a whole number is ignored |
 | `INIT_MSG` | No | - | Message posted on startup. Leave unset for a silent start - the process restarts more often than you'd think |
 | `DISCORD_TEAM_MENTIONS` | No | - | Discord only. `team_id:user_id` pairs, comma-separated (`1:393143738374946817,2:...`), mapping ESPN team ids to Discord user ids. Turns on the @mention callouts under scoreboards and the Tuesday final |
+| `DISCORD_MENTION_STYLE` | No | `ping` | Discord only. `ping` notifies the people named in callouts; `silent` shows the same blue @names without notifying anyone; `names` uses team names instead. The trade role ping is separate and always notifies |
 | `DISCORD_ANNOUNCE_ROLE_ID` | No | - | Discord only. Role id pinged when a trade is accepted and the league's veto window opens |
 | `DISCORD_MENTION_WEBHOOK_URL` | No | - | Discord only. A second webhook (say, your discussion channel). When set, the short @mention lines post there on their own and the full reports stay in `DISCORD_WEBHOOK_URL`'s channel |
 | `STATE_DIR` | No | `/tmp` | Writable directory for the trade announcer's "already announced" file. Point it at a volume to survive restarts |
