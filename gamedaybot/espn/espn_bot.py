@@ -168,6 +168,7 @@ def espn_bot(function):
 
     text = ''
     mention_text = ''
+    discord_channel = 'reports'
     logger.info("Function: " + function)
 
     if function == "get_matchups":
@@ -228,11 +229,8 @@ def espn_bot(function):
         else:
             text = "Final " + scores
             text = text + "\n\n" + espn.get_trophies(league, week=week, box_scores=box_scores)
-            mention_text = '\n'.join(part for part in (
-                callouts.final_callouts(league, week, box_scores, mentions),
-                callouts.player_of_the_week(box_scores, mentions),
-                callouts.lineup_regret(box_scores, mentions),
-            ) if part)
+            # The finals and trophies go to the discussion channel too, as-is.
+            discord_channel = 'both'
     elif function == "get_night_watch":
         # Who still has players to play, to the discussion channel.
         box_scores = espn.fetch_box_scores(league)
@@ -267,7 +265,7 @@ def espn_bot(function):
         text = "Something bad happened. HALP"
 
     logger.debug(data)
-    _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot)
+    _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot, discord_channel=discord_channel)
 
 
 def _broadcast(text, mention_text, str_limit, groupme_bot, slack_bot, discord_bot, discord_channel='reports'):

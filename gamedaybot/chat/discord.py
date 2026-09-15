@@ -59,8 +59,8 @@ class Discord(object):
             mention webhook is configured, the mention text there instead.
             'mentions' sends the whole message -- text and mention text -- to
             the mention webhook, for things the discussion channel should get
-            in full, like the season recap. Without a mention webhook both
-            behave the same.
+            in full, like the season recap. 'both' sends the whole message to
+            each webhook. Without a mention webhook all three behave the same.
 
         Returns
         -------
@@ -74,10 +74,13 @@ class Discord(object):
         """
 
         message = "```{0}```".format(text)
-        if channel == 'mentions' and self.mention_webhook_url:
+        if channel in ('mentions', 'both') and self.mention_webhook_url:
             if mention_text:
                 message = message + "\n" + mention_text
-            return self._post(self.mention_webhook_url, message)
+            r = self._post(self.mention_webhook_url, message)
+            if channel == 'mentions' or self.webhook_url in (1, "1", ''):
+                return r
+            return self._post(self.webhook_url, message)
 
         if mention_text and not self.mention_webhook_url:
             message = message + "\n" + mention_text

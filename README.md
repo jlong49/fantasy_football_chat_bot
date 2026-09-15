@@ -130,7 +130,7 @@ to `END_DATE`, and the bot goes quiet once the league's matchup periods are over
 | Scoreboard + projections | Mon & Fri | 7:30 AM local | Morning recap of Thursday and Sunday |
 | Monday Night Watch | Mon | 6:31 PM ET | Every undecided matchup with the players each side still has to play. Goes to the mention channel if one is set |
 | Close Scores | Mon | 6:30 PM ET | Games projected within `CLOSE_SCORES_THRESHOLD` points (15 by default) that still have players to play - the ones to watch on MNF |
-| Final scores + trophies | Tue | 7:30 AM local | Last week's finals plus all 10 weekly awards |
+| Final scores + trophies | Tue | 7:30 AM local | Last week's finals plus all 10 weekly awards. Also sent to the mention channel if one is set |
 | Power Rankings | Tue | 6:30 PM local | Two-step dominance rankings with week-over-week movement |
 | Standings | Wed | 7:30 AM local | Current standings |
 | Waiver Report | Wed | 7:31 AM local | Every add/drop from the day, with FAAB bids and the outbid rival in FAAB leagues |
@@ -148,10 +148,8 @@ still to play) so they never contradict the projected scores above them: "🔥 @
 DESTROYING @b" once the projected winner is up 30+ and @b is nearly out of players,
 "🔄 @a is up 29.70 on @b, but @b is still projected to win" for a lead that won't
 hold, and "😬 @a vs @b is a coin flip" when a mostly-played matchup is projected
-within 5. Nothing is said until half the week's starters have played. The Tuesday
-final pings the top score, the low score, the biggest win and the worst bench manager, plus
-the started player and bust of the week and the bench decision that cost someone their
-game. Thursday's matchups note any team on a 3+ game win or loss streak. Set `DISCORD_ANNOUNCE_ROLE_ID` and an accepted trade pings that role while the veto
+within 5. Nothing is said until half the week's starters have played. Thursday's matchups
+note any team on a 3+ game win or loss streak. Set `DISCORD_ANNOUNCE_ROLE_ID` and an accepted trade pings that role while the veto
 window is open. Mentions can't render inside Discord code blocks, which is why these
 lines sit beneath the report rather than in it. If a wall of scoreboards would crowd
 your main channel, set `DISCORD_MENTION_WEBHOOK_URL` to a webhook there: the pings go
